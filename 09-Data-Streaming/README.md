@@ -64,9 +64,21 @@ MICRO-BATCH:
 +--------+   +--------+   +--------+
 ```
 
-### Event Sourcing
+### What is Event Sourcing?
 
-Store all state changes as a sequence of events.
+**Event Sourcing** is a design pattern where state changes are stored as an immutable sequence of events, rather than just storing the current state. Every change to the application state is captured as an event that can be replayed to reconstruct the current state.
+
+### Why Event Sourcing?
+
+| Benefit | Description |
+|---------|-------------|
+| **Complete Audit Trail** | Every change is recorded with full history |
+| **Temporal Queries** | Query state at any point in time |
+| **Debugging** | Replay events to understand what happened |
+| **Event-Driven Architecture** | Natural fit for microservices |
+| **Decoupled Read/Write** | Separate write model (events) from read model |
+
+### Traditional vs Event Sourcing
 
 ```
 Traditional (Current State):
@@ -74,6 +86,7 @@ Traditional (Current State):
 | Account Balance  |
 | =            |
 +------------------+
+Problem: History is lost, can't audit changes
 
 Event Sourcing (History):
 +------------------------------------------+
@@ -85,11 +98,73 @@ Event Sourcing (History):
 | 5. Withdrawal: -                     |
 | Current:  (replayed from events)     |
 +------------------------------------------+
+Benefit: Full history preserved, can reconstruct any state
 ```
 
-### CQRS (Command Query Responsibility Segregation)
+### Event Sourcing Example - Banking
 
-Separate read and write models.
+```sql
+-- Events table (immutable)
+CREATE TABLE account_events (
+    event_id BIGSERIAL PRIMARY KEY,
+    account_id VARCHAR(20) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    event_data JSONB NOT NULL,
+    event_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    event_version INT NOT NULL
+);
+
+-- Insert events
+INSERT INTO account_events (account_id, event_type, event_data, event_version)
+VALUES 
+    ('ACC-001', 'AccountCreated', '{"balance": 0, "currency": "USD"}', 1),
+    ('ACC-001', 'MoneyDeposited', '{"amount": 1000, "balance": 1000}', 2),
+    ('ACC-001', 'MoneyWithdrawn', '{"amount": 200, "balance": 800}', 3),
+    ('ACC-001', 'MoneyDeposited', '{"amount": 500, "balance": 1300}', 4);
+
+-- Reconstruct current state by replaying events
+WITH current_state AS (
+    SELECT 
+        account_id,
+        MAX(event_version) as latest_version
+    FROM account_events
+    GROUP BY account_id
+)
+SELECT 
+    e.account_id,
+    e.event_data->>'balance' as current_balance
+FROM account_events e
+JOIN current_state c ON e.account_id = c.account_id 
+    AND e.event_version = c.latest_version;
+```
+
+### When to Use Event Sourcing
+
+| Scenario | Use Event Sourcing? | Why |
+|----------|---------------------|-----|
+| Banking/Financial systems | ✅ Yes | Full audit trail required |
+| E-commerce order management | ✅ Yes | Track order lifecycle |
+| Healthcare records | ✅ Yes | Compliance and auditability |
+| Simple CRUD application | ❌ No | Overkill, adds complexity |
+| Real-time analytics | ⚠️ Maybe | Use with CQRS for read optimization |
+
+---
+
+### What is CQRS?
+
+**CQRS (Command Query Responsibility Segregation)** is a pattern that separates read and write operations into different models. Commands (writes) update the state, while Queries (reads) return data without modifying it.
+
+### Why CQRS?
+
+| Benefit | Description |
+|---------|-------------|
+| **Optimized Read/Write** | Each model optimized for its purpose |
+| **Scalability** | Scale reads and writes independently |
+| **Performance** | Read model can be denormalized for fast queries |
+| **Security** | Separate permissions for reads and writes |
+| **Event Sourcing Integration** | Natural fit with event-sourced systems |
+
+### How CQRS Works
 
 ```
 Commands (Writes)              Queries (Reads)
@@ -104,6 +179,90 @@ Commands (Writes)              Queries (Reads)
 | (Normalized|               |(Denormalized|
 |  for writes|               | for reads) |
 +------------+                +------------+
+
+Write Model: Optimized for consistency and integrity
+Read Model: Optimized for query performance
+```
+
+### CQRS with Event Sourcing
+
+```
+Commands --> Event Store --> Events --> Read Model
+                |                     (Denormalized)
+                v                           |
+           Event Bus                        v
+           (Kafka)                    Query API
+                |                     (Fast reads)
+                v
+           Projections
+           (Build read models)
+```
+
+### CQRS Example - E-Commerce
+
+```sql
+-- Write Model (Normalized for consistency)
+CREATE TABLE orders_write (
+    order_id UUID PRIMARY KEY,
+    customer_id UUID NOT NULL,
+    status VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE order_items_write (
+    item_id UUID PRIMARY KEY,
+    order_id UUID REFERENCES orders_write(order_id),
+    product_id UUID NOT NULL,
+    quantity INT,
+    unit_price DECIMAL(10,2)
+);
+
+-- Read Model (Denormalized for fast queries)
+CREATE TABLE orders_read (
+    order_id UUID PRIMARY KEY,
+    customer_id UUID,
+    customer_name VARCHAR(100),  -- Denormalized from customer service
+    customer_email VARCHAR(100),
+    order_status VARCHAR(20),
+    total_amount DECIMAL(12,2),  -- Pre-calculated
+    item_count INT,              -- Pre-calculated
+    created_at TIMESTAMP,
+    INDEX idx_customer (customer_id),
+    INDEX idx_status (order_status)
+);
+```
+
+### When to Use CQRS
+
+| Scenario | Use CQRS? | Why |
+|----------|-----------|-----|
+| High read/write ratio | ✅ Yes | Optimize reads separately |
+| Complex queries on write data | ✅ Yes | Read model can be denormalized |
+| Microservices architecture | ✅ Yes | Each service owns its data |
+| Simple CRUD application | ❌ No | Adds unnecessary complexity |
+| Event Sourcing system | ✅ Yes | Natural pairing |
+
+### Event Sourcing + CQRS Together
+
+```
++--------------------------------------------------+
+|           COMPLETE PATTERN                        |
++--------------------------------------------------+
+|                                                  |
+|  Commands --> Event Store --> Events             |
+|                |                |                |
+|                v                v                |
+|           Event Bus         Projections          |
+|           (Kafka)          (Build reads)         |
+|                |                |                |
+|                v                v                |
+|           Event Handlers   Read Model           |
+|           (Update state)   (Fast queries)        |
+|                                  |               |
+|                                  v               |
+|                             Query API            |
+|                             (Serve reads)        |
++--------------------------------------------------+
 ```
 
 ### Modern Streaming Tools
