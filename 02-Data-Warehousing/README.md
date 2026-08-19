@@ -72,10 +72,10 @@ OLTP systems handle day-to-day operational transactions. They are optimized for 
 - Optimized for INSERT, UPDATE, DELETE
 
 **Example Query:**
-`sql
+```sql
 SELECT * FROM accounts WHERE account_id = 'ACC-12345';
 UPDATE accounts SET balance = balance - 500 WHERE account_id = 'ACC-12345';
-`
+```
 
 ### OLAP (Online Analytical Processing)
 
