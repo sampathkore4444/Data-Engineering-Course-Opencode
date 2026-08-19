@@ -6,6 +6,23 @@
 3. [Data Warehouse vs Data Lake vs Data Lakehouse](#3-data-warehouse-vs-data-lake-vs-data-lakehouse)
 4. [Inmon vs Kimball](#4-inmon-vs-kimball)
 5. [Dimensional Modeling](#5-dimensional-modeling)
+   - [What is a Star Schema?](#what-is-a-star-schema)
+   - [What is a Snowflake Schema?](#what-is-a-snowflake-schema)
+   - [Star Schema vs Snowflake Schema](#star-schema-vs-snowflake-schema-detailed-comparison)
+   - [Choosing the Right Schema](#choosing-the-right-schema)
+6. [Slowly Changing Dimensions](#6-slowly-changing-dimensions)
+7. [Fact Tables](#7-fact-tables)
+8. [Real-World Scenarios](#8-real-world-scenarios)
+9. [Banking Examples](#9-banking-examples)
+10. [E-Commerce Examples](#10-e-commerce-examples)
+11. [Performance Optimization](#11-performance-optimization)
+12. [Hands-On Exercises](#12-hands-on-exercises)
+   - [Exercise 1: Star Schema vs Snowflake Schema Design](#exercise-1-star-schema-vs-snowflake-schema-design)
+   - [Exercise 2: Schema Selection Scenarios](#exercise-2-schema-selection-scenarios)
+   - [Exercise 3: Convert Star Schema to Snowflake](#exercise-3-convert-star-schema-to-snowflake)
+   - [Exercise 4: Query Performance Analysis](#exercise-4-query-performance-analysis)
+   - [Exercise 5: Hybrid Approach Implementation](#exercise-5-hybrid-approach-implementation)
+13. [Interview Questions](#13-interview-questions)
 6. [Slowly Changing Dimensions](#6-slowly-changing-dimensions)
 7. [Fact Tables](#7-fact-tables)
 8. [Real-World Scenarios](#8-real-world-scenarios)
@@ -216,29 +233,51 @@ Source -> ETL -> Staging -> Data Marts (Star Schema) -> BI
 
 ## 5. Dimensional Modeling
 
-### Star Schema
+### What is a Star Schema?
 
-Central **fact table** surrounded by **dimension tables**. The most common model for data warehousing.
+A **star schema** is a way to organize data in a database, especially in data warehouses, to make it easier and faster to analyze. At the center, there's a main table called the **fact table**, which holds measurable data like sales or revenue. Around it are **dimension tables**, which add details like product names, customer info, or dates. This layout forms a star-like shape.
 
 ```
-dim_date              fact_sales              dim_product
+                    dim_date
+                   +-----------+
+                   | date_key  |
+                   | full_date |
+                   | quarter   |
+                   | year      |
+                   +-----------+
+                         |
+                         v
+ dim_product          fact_sales          dim_customer
 +-----------+        +--------------+        +-----------+
-| date_key  |<------| date_key     |------>| product_key|
-| full_date |        | product_key  |        | prod_name |
-| quarter   |        | customer_key |        | category  |
-| year      |        | store_key    |        | brand     |
-+-----------+        | quantity     |        | unit_price|
-                     | revenue      |        +-----------+
-dim_customer         | cost         |
-+-----------+        +--------------+
-| cust_key  |<------|
-| name      |        dim_store
-| segment   |        +-----------+
-| city      |<-------| store_key |
-+-----------+        | store_name|
-                     | region    |
-                     +-----------+
+| product_key|<------| date_key     |------>| cust_key  |
+| prod_name |        | product_key  |        | name      |
+| category  |        | customer_key |        | segment   |
+| brand     |        | store_key    |        | city      |
++-----------+        | quantity     |        +-----------+
+                     | revenue      |
+                     | cost         |
+                     +--------------+
+                           |
+                           v
+                       dim_store
+                      +-----------+
+                      | store_key |
+                      | store_name|
+                      | region    |
+                      +-----------+
 ```
+
+### Key Features of Star Schema
+
+| Feature | Description |
+|---------|-------------|
+| **Single-level dimension tables** | Dimension tables connect directly to the fact table without extra layers. Each table focuses on one area (products, regions, time). |
+| **Denormalized design** | Related data is stored together in one table. For example, a product table may include product ID, name, and category in the same place. |
+| **Common in data warehousing** | Used for quick analysis. Can easily filter or calculate totals, making it ideal for fast insights. |
+
+### Star Schema Example
+
+Let's look at a real-world example. The fact table **Sales** is in the center and holds the numeric data you want to analyze (sales, profits). Connected to it are dimension tables with descriptive details:
 
 **SQL to Create Star Schema:**
 ```sql
@@ -292,17 +331,166 @@ CREATE TABLE fact_sales (
 );
 ```
 
-### Snowflake Schema
+### What is a Snowflake Schema?
 
-Normalized dimension tables to reduce redundancy.
+A **snowflake schema** is another way of organizing data. In this schema, dimension tables are split into smaller sub-dimensions to keep data more organized and detailed — just like snowflakes in a large lake.
 
 ```
-dim_continent -> dim_country -> dim_region -> dim_store -> fact_sales
-
-dim_brand -> dim_category -> dim_subcategory -> dim_product -> fact_sales
+                           fact_sales
+                              |
+            +-----------------+------------------+
+            |                 |                  |
+            v                 v                  v
+     dim_product         dim_customer        dim_date
+     +-----------+       +-----------+       +-----------+
+     | product_key|      | cust_key  |       | date_key  |
+     | prod_name |       | name      |       | full_date |
+     | category_id|      | location_id|      | year      |
+     | manufacturer_id|  +-----------+       +-----------+
+     +-----------+            |
+          |                   v
+          v              dim_location
+   +--------------+     +-----------+
+   |              |     | location_id|
+   v              v     | city      |
+dim_category  dim_manufacturer | state     |
++-----------+ +-----------+  | country   |
+| cat_id    | | mfg_id    |  +-----------+
+| cat_name  | | mfg_name  |
++-----------+ +-----------+
 ```
 
-**Trade-off:** Less redundancy but more joins, slower queries.
+### Key Features of Snowflake Schema
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-level dimension tables** | Dimension tables are broken down into smaller, more specific tables. For example, location can be split into separate tables for countries, states, and cities. |
+| **Normalization for storage efficiency** | Follows a normalized design to avoid data duplication. Rather than repeating a category name for every product, it's stored in a separate table. |
+| **Suitability for complex data environments** | Works best for complex data environments with multi-level tables to handle intricate relationships and hierarchical data structures. |
+
+### Snowflake Schema Example
+
+At the center is the fact table with measurable data. It connects to dimension tables that further branch out into sub-dimension tables, forming a snowflake-like structure.
+
+**SQL to Create Snowflake Schema:**
+
+```sql
+-- Fact table remains the same
+CREATE TABLE Sales (
+    Sales_ID INT PRIMARY KEY,
+    Product_ID INT,
+    Customer_ID INT,
+    Date_ID INT,
+    Sales_Amount DECIMAL(10, 2),
+    FOREIGN KEY (Product_ID) REFERENCES Product(Product_ID),
+    FOREIGN KEY (Customer_ID) REFERENCES Customers(Customer_ID),
+    FOREIGN KEY (Date_ID) REFERENCES Dates(Date_ID)
+);
+
+-- Dimension table: Product (normalized)
+CREATE TABLE Product (
+    Product_ID INT PRIMARY KEY,
+    Product_Name VARCHAR(100),
+    Category_ID INT,
+    Manufacturer_ID INT,
+    FOREIGN KEY (Category_ID) REFERENCES Category(Category_ID),
+    FOREIGN KEY (Manufacturer_ID) REFERENCES Manufacturer(Manufacturer_ID)
+);
+
+-- Sub-dimension table: Category
+CREATE TABLE Category (
+    Category_ID INT PRIMARY KEY,
+    Category_Name VARCHAR(50)
+);
+
+-- Sub-dimension table: Manufacturer
+CREATE TABLE Manufacturer (
+    Manufacturer_ID INT PRIMARY KEY,
+    Manufacturer_Name VARCHAR(100)
+);
+```
+
+**Query Example (Snowflake Schema):**
+
+```sql
+-- Calculate total sales by product category
+-- More joins than star schema, but more storage-efficient
+SELECT 
+    cat.Category_Name, 
+    SUM(s.Sales_Amount) AS TotalSales
+FROM Sales s
+JOIN Product p ON s.Product_ID = p.Product_ID
+JOIN Category cat ON p.Category_ID = cat.Category_ID
+GROUP BY cat.Category_Name;
+```
+
+### Advantages and Limitations
+
+**Star Schema:**
+| Advantages | Limitations |
+|------------|-------------|
+| Faster query performance (fewer joins) | Higher data redundancy |
+| Easy to understand and maintain | More storage space required |
+| Ideal for BI tools and dashboards | May not suit very complex hierarchies |
+
+**Snowflake Schema:**
+| Advantages | Limitations |
+|------------|-------------|
+| Less data redundancy | Slower queries (more joins) |
+| Efficient storage for large datasets | More complex to design and maintain |
+| Better data integrity | Requires experienced DBA team |
+
+### Hybrid Approach
+
+In real projects, it's common to use both patterns at different layers:
+
+- **Warehouse layer:** Keep more normalized (snowflaked) structures for consistency and easier maintenance
+- **Data marts:** Publish star-shaped marts or denormalized views for BI and reporting
+
+This lets teams balance data integrity and governance with fast, simple analytics consumption.
+
+### Star Schema vs Snowflake Schema: Detailed Comparison
+
+| Feature | Star Schema | Snowflake Schema | Hybrid Approach |
+|---------|-------------|------------------|------------------|
+| **Structure** | Central fact table linked to denormalized dimensions | Central fact table linked to normalized dimensions | Normalized core model, plus star-shaped marts or denormalized views |
+| **Complexity** | Simple, with fewer joins | Complex, with more joins | Medium, with more moving parts, but each layer stays simpler |
+| **Data redundancy** | Higher redundancy due to denormalized dimensions | Lower redundancy due to normalized dimensions | Medium redundancy due to selective denormalization |
+| **Query performance** | Faster queries due to simpler structure | Slower queries because of additional joins | Fast for BI because the consumption layer is denormalized |
+| **Storage** | Requires more storage because of redundancy | Requires less storage due to normalization | Requires moderate storage because marts/views may add some duplication |
+| **Ease of maintenance** | Easier to design and maintain | More complex to design and maintain | Easy to maintain, as marts can be rebuilt from the controlled core |
+| **Best suited for** | Small to medium-sized datasets | Large and complex datasets | Modern data platforms with governance + BI performance needs |
+
+### Choosing the Right Schema
+
+#### When to Use a Star Schema
+
+| Scenario | Why Star Schema Works |
+|----------|----------------------|
+| **BI tool semantic models** | Low number of tables and relationships, supports intuitive filtering/grouping |
+| **Simple analytical queries** | "Find total sales by region" — avoids unnecessary complexity |
+| **Speed is priority** | Minimizes table joins, queries run faster |
+| **Small to medium datasets** | Redundancy won't be a problem, works fine without overwhelming storage |
+
+#### When to Use a Snowflake Schema
+
+| Scenario | Why Snowflake Schema Works |
+|----------|---------------------------|
+| **Clear hierarchies** | Country → State/Region → City modeled as separate tables |
+| **Shared reference data** | Standard lists like categories, manufacturers, geographies |
+| **Frequent dimension updates** | Updating region names maintains consistency across all related data |
+| **Multi-level analysis** | Organize and represent complex relationships in a structured way |
+
+#### Schema Selection in Cloud Data Warehouses
+
+In many modern cloud data warehouses, **storage is relatively inexpensive compared to compute**. That means the "extra storage" from denormalized dimensions is often less important than the compute cost of scanning and joining data.
+
+When choosing between star and snowflake, consider:
+- **Platform pricing model** (compute vs. storage costs)
+- **Query concurrency** requirements
+- **Caching/materialized views** availability to keep query costs down
+
+> **Best Practice:** Start with a star schema for simplicity and performance. Only normalize to snowflake when you have specific requirements like very large dimension tables, strict data governance, or complex hierarchies that benefit from normalization.
 
 ---
 
@@ -829,7 +1017,387 @@ SELECT * FROM final;
 
 ## 12. Hands-On Exercises
 
-### Exercise 1: Create a Star Schema (SQL)
+### Exercise 1: Star Schema vs Snowflake Schema Design
+
+**Task:** Design both a Star Schema and Snowflake Schema for an e-commerce company, then compare them.
+
+#### Scenario
+An e-commerce company tracks sales across multiple regions. They need:
+- Sales transactions with amounts, quantities, and dates
+- Product information including categories and manufacturers
+- Customer information including locations (country, state, city)
+- Store/warehouse information
+
+#### Part A: Star Schema Design
+
+```sql
+-- Star Schema: Denormalized dimensions
+
+-- Fact Table
+CREATE TABLE fact_sales_star (
+    sale_key BIGSERIAL PRIMARY KEY,
+    date_key INT REFERENCES dim_date_star(date_key),
+    product_key INT REFERENCES dim_product_star(product_key),
+    customer_key INT REFERENCES dim_customer_star(customer_key),
+    store_key INT REFERENCES dim_store_star(store_key),
+    quantity INT,
+    unit_price DECIMAL(10,2),
+    revenue DECIMAL(12,2),
+    cost DECIMAL(12,2)
+);
+
+-- Dimension: Date (same for both schemas)
+CREATE TABLE dim_date_star (
+    date_key INT PRIMARY KEY,
+    full_date DATE NOT NULL,
+    day_of_week VARCHAR(10),
+    month_name VARCHAR(10),
+    quarter INT,
+    year INT
+);
+
+-- Dimension: Product (denormalized - all info in one table)
+CREATE TABLE dim_product_star (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(20) UNIQUE NOT NULL,
+    product_name VARCHAR(100),
+    category VARCHAR(50),        -- Category stored directly
+    subcategory VARCHAR(50),
+    brand VARCHAR(50),           -- Brand/manufacturer stored directly
+    manufacturer VARCHAR(100),
+    unit_cost DECIMAL(10,2)
+);
+
+-- Dimension: Customer (denormalized - all location info in one table)
+CREATE TABLE dim_customer_star (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(20) UNIQUE NOT NULL,
+    customer_name VARCHAR(100),
+    email VARCHAR(100),
+    country VARCHAR(50),         -- Location hierarchy flattened
+    state VARCHAR(50),
+    city VARCHAR(50),
+    segment VARCHAR(20)
+);
+
+-- Dimension: Store (denormalized)
+CREATE TABLE dim_store_star (
+    store_key SERIAL PRIMARY KEY,
+    store_id VARCHAR(20) UNIQUE NOT NULL,
+    store_name VARCHAR(100),
+    region VARCHAR(50),          -- Region stored directly
+    country VARCHAR(50),
+    city VARCHAR(50)
+);
+```
+
+#### Part B: Snowflake Schema Design
+
+```sql
+-- Snowflake Schema: Normalized dimensions with sub-dimensions
+
+-- Fact Table (same structure)
+CREATE TABLE fact_sales_snowflake (
+    sale_key BIGSERIAL PRIMARY KEY,
+    date_key INT REFERENCES dim_date_snowflake(date_key),
+    product_key INT REFERENCES dim_product_snowflake(product_key),
+    customer_key INT REFERENCES dim_customer_snowflake(customer_key),
+    store_key INT REFERENCES dim_store_snowflake(store_key),
+    quantity INT,
+    unit_price DECIMAL(10,2),
+    revenue DECIMAL(12,2),
+    cost DECIMAL(12,2)
+);
+
+-- Dimension: Date (same)
+CREATE TABLE dim_date_snowflake (
+    date_key INT PRIMARY KEY,
+    full_date DATE NOT NULL,
+    day_of_week VARCHAR(10),
+    month_name VARCHAR(10),
+    quarter INT,
+    year INT
+);
+
+-- Dimension: Product (normalized - category in separate table)
+CREATE TABLE dim_product_snowflake (
+    product_key SERIAL PRIMARY KEY,
+    product_id VARCHAR(20) UNIQUE NOT NULL,
+    product_name VARCHAR(100),
+    category_key INT REFERENCES dim_category(category_key),
+    manufacturer_key INT REFERENCES dim_manufacturer(manufacturer_key),
+    unit_cost DECIMAL(10,2)
+);
+
+-- Sub-dimension: Category
+CREATE TABLE dim_category (
+    category_key SERIAL PRIMARY KEY,
+    category_name VARCHAR(50) UNIQUE NOT NULL,
+    subcategory VARCHAR(50)
+);
+
+-- Sub-dimension: Manufacturer
+CREATE TABLE dim_manufacturer (
+    manufacturer_key SERIAL PRIMARY KEY,
+    manufacturer_name VARCHAR(100) UNIQUE NOT NULL,
+    country VARCHAR(50)
+);
+
+-- Dimension: Customer (normalized - location in separate table)
+CREATE TABLE dim_customer_snowflake (
+    customer_key SERIAL PRIMARY KEY,
+    customer_id VARCHAR(20) UNIQUE NOT NULL,
+    customer_name VARCHAR(100),
+    email VARCHAR(100),
+    location_key INT REFERENCES dim_location(location_key),
+    segment VARCHAR(20)
+);
+
+-- Sub-dimension: Location (hierarchical)
+CREATE TABLE dim_location (
+    location_key SERIAL PRIMARY KEY,
+    city VARCHAR(50),
+    state_key INT REFERENCES dim_state(state_key)
+);
+
+CREATE TABLE dim_state (
+    state_key SERIAL PRIMARY KEY,
+    state_name VARCHAR(50),
+    country_key INT REFERENCES dim_country(country_key)
+);
+
+CREATE TABLE dim_country (
+    country_key SERIAL PRIMARY KEY,
+    country_name VARCHAR(50) UNIQUE NOT NULL,
+    continent VARCHAR(20)
+);
+
+-- Dimension: Store (normalized - region in separate table)
+CREATE TABLE dim_store_snowflake (
+    store_key SERIAL PRIMARY KEY,
+    store_id VARCHAR(20) UNIQUE NOT NULL,
+    store_name VARCHAR(100),
+    region_key INT REFERENCES dim_region(region_key)
+);
+
+CREATE TABLE dim_region (
+    region_key SERIAL PRIMARY KEY,
+    region_name VARCHAR(50),
+    country_key INT REFERENCES dim_country(country_key)
+);
+```
+
+#### Part C: Query Comparison
+
+```sql
+-- Star Schema Query: Total sales by country
+-- Simple: 1 join only
+SELECT 
+    c.country,
+    SUM(s.revenue) AS total_sales
+FROM fact_sales_star s
+JOIN dim_customer_star c ON s.customer_key = c.customer_key
+GROUP BY c.country;
+
+-- Snowflake Schema Query: Same analysis
+-- Complex: 4 joins required
+SELECT 
+    co.country_name,
+    SUM(s.revenue) AS total_sales
+FROM fact_sales_snowflake s
+JOIN dim_customer_snowflake c ON s.customer_key = c.customer_key
+JOIN dim_location l ON c.location_key = l.location_key
+JOIN dim_state st ON l.state_key = st.state_key
+JOIN dim_country co ON st.country_key = co.country_key
+GROUP BY co.country_name;
+```
+
+**Questions to Answer:**
+1. Which schema has fewer joins for a query by country?
+2. Which schema uses more storage for the customer dimension?
+3. If you need to update "Electronics" to "Consumer Electronics" in the category, which schema requires fewer updates?
+
+---
+
+### Exercise 2: Schema Selection Scenarios
+
+**Task:** For each scenario, choose Star or Snowflake schema and explain why.
+
+| Scenario | Your Choice | Reason |
+|----------|-------------|--------|
+| 1. BI dashboard showing daily sales by product category | | |
+| 2. Financial reporting with complex regulatory hierarchies | | |
+| 3. Real-time analytics with sub-second query requirements | | |
+| 4. Data warehouse with 10TB+ of product data and frequent category updates | | |
+| 5. Small startup with 100GB data and 3-person data team | | |
+| 6. Enterprise with strict data governance and audit requirements | | |
+
+**Sample Answers:**
+
+| Scenario | Choice | Reason |
+|----------|--------|--------|
+| 1. BI dashboard | **Star** | Fewer joins = faster queries for interactive dashboards |
+| 2. Financial reporting | **Snowflake** | Complex hierarchies benefit from normalization |
+| 3. Real-time analytics | **Star** | Minimal joins for sub-second performance |
+| 4. Large product data | **Snowflake** | Storage savings significant at 10TB+, easy category updates |
+| 5. Small startup | **Star** | Simpler to maintain with small team |
+| 6. Enterprise governance | **Snowflake** | Better data integrity and audit trail |
+
+---
+
+### Exercise 3: Convert Star Schema to Snowflake
+
+**Task:** Normalize the following Star Schema into a Snowflake Schema.
+
+**Given Star Schema:**
+```sql
+-- Current Star Schema
+CREATE TABLE dim_product (
+    product_key SERIAL PRIMARY KEY,
+    product_name VARCHAR(100),
+    category VARCHAR(50),
+    subcategory VARCHAR(50),
+    brand VARCHAR(50),
+    supplier VARCHAR(100),
+    supplier_country VARCHAR(50)
+);
+```
+
+**Your Task:** Write SQL to create the normalized Snowflake version.
+
+**Solution:**
+```sql
+-- Snowflake Schema: Normalized
+CREATE TABLE dim_product_normalized (
+    product_key SERIAL PRIMARY KEY,
+    product_name VARCHAR(100),
+    category_key INT REFERENCES dim_category(category_key),
+    brand_key INT REFERENCES dim_brand(brand_key),
+    supplier_key INT REFERENCES dim_supplier(supplier_key)
+);
+
+CREATE TABLE dim_category (
+    category_key SERIAL PRIMARY KEY,
+    category_name VARCHAR(50),
+    subcategory VARCHAR(50)
+);
+
+CREATE TABLE dim_brand (
+    brand_key SERIAL PRIMARY KEY,
+    brand_name VARCHAR(50)
+);
+
+CREATE TABLE dim_supplier (
+    supplier_key SERIAL PRIMARY KEY,
+    supplier_name VARCHAR(100),
+    country VARCHAR(50)
+);
+```
+
+**Questions:**
+1. How many tables did you create?
+2. What is the storage benefit if you have 1 million products with 100 unique categories?
+3. How many joins are needed to get product name, category, and supplier country?
+
+---
+
+### Exercise 4: Query Performance Analysis
+
+**Task:** Analyze the performance implications of each schema.
+
+```sql
+-- Scenario: Find total sales by category for Q1 2024
+
+-- Star Schema Query
+EXPLAIN ANALYZE
+SELECT 
+    p.category,
+    SUM(s.revenue) as total_sales,
+    COUNT(*) as transaction_count
+FROM fact_sales s
+JOIN dim_product p ON s.product_key = p.product_key
+JOIN dim_date d ON s.date_key = d.date_key
+WHERE d.year = 2024 AND d.quarter = 1
+GROUP BY p.category;
+-- Expected: 2 joins, fast execution
+
+-- Snowflake Schema Query
+EXPLAIN ANALYZE
+SELECT 
+    c.category_name,
+    SUM(s.revenue) as total_sales,
+    COUNT(*) as transaction_count
+FROM fact_sales s
+JOIN dim_product p ON s.product_key = p.product_key
+JOIN dim_category c ON p.category_key = c.category_key
+JOIN dim_date d ON s.date_key = d.date_key
+WHERE d.year = 2024 AND d.quarter = 1
+GROUP BY c.category_name;
+-- Expected: 3 joins, slightly slower
+```
+
+**Analysis Questions:**
+1. Compare the execution plans - how many joins does each query use?
+2. Estimate the performance difference (assume 100M rows in fact table)
+3. If you add an index on dim_category.category_name, does it help the Snowflake query?
+
+---
+
+### Exercise 5: Hybrid Approach Implementation
+
+**Task:** Implement a hybrid approach where the warehouse layer uses Snowflake schema but the data mart uses Star schema.
+
+```sql
+-- Layer 1: Warehouse (Snowflake Schema - normalized for governance)
+CREATE TABLE wh_product (
+    product_key SERIAL PRIMARY KEY,
+    product_name VARCHAR(100),
+    category_key INT REFERENCES wh_category(category_key),
+    manufacturer_key INT REFERENCES wh_manufacturer(manufacturer_key)
+);
+
+CREATE TABLE wh_category (
+    category_key SERIAL PRIMARY KEY,
+    category_name VARCHAR(50),
+    subcategory VARCHAR(50)
+);
+
+CREATE TABLE wh_manufacturer (
+    manufacturer_key SERIAL PRIMARY KEY,
+    manufacturer_name VARCHAR(100),
+    country VARCHAR(50)
+);
+
+-- Layer 2: Data Mart (Star Schema - denormalized for BI consumption)
+CREATE VIEW mart_product AS
+SELECT 
+    p.product_key,
+    p.product_name,
+    c.category_name,
+    c.subcategory,
+    m.manufacturer_name,
+    m.country as manufacturer_country
+FROM wh_product p
+JOIN wh_category c ON p.category_key = c.category_key
+JOIN wh_manufacturer m ON p.manufacturer_key = m.manufacturer_key;
+
+-- Now BI tools query the denormalized view
+SELECT 
+    category_name,
+    COUNT(*) as product_count
+FROM mart_product
+GROUP BY category_name;
+```
+
+**Benefits of this approach:**
+- Warehouse layer maintains data integrity with normalized structures
+- Data mart provides fast queries for BI tools
+- Changes to categories only need to update one row in wh_category
+- BI tools see a simple star schema without complex joins
+
+---
+
+### Exercise 6: Create a Star Schema (SQL)
 ```sql
 -- Task: Create a complete star schema for an e-commerce platform
 
