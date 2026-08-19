@@ -181,22 +181,24 @@ Data Lake           Data Lakehouse              Data Warehouse
 
 Build a **centralized enterprise data warehouse (3NF)** first, then create data marts from it.
 
-`
+```
 Source -> ETL -> Enterprise DW (3NF) -> Data Marts -> BI
-`
+```
 
 **Pros:** Single source of truth, consistent data, strong governance
+
 **Cons:** Longer time to value, higher upfront cost, complex
 
 ### Ralph Kimball (Bottom-Up)
 
 Build **dimensional data marts** for each business process, integrate via conformed dimensions.
 
-`
+```
 Source -> ETL -> Staging -> Data Marts (Star Schema) -> BI
-`
+```
 
 **Pros:** Faster time to value, easier to understand, incremental
+
 **Cons:** Potential redundancy, harder to maintain consistency
 
 ### Which to Choose?
