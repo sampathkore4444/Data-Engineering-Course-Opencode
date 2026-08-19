@@ -1012,7 +1012,12 @@ sources:
 ### Q1: What is the difference between a data warehouse and a data lake?
 
 **Answer:**
-A **data warehouse** stores structured, processed data optimized for BI and analytics using schema-on-write. It's ideal for consistent, high-quality reporting. A **data lake** stores raw data in native format (structured, semi-structured, unstructured) using schema-on-read, ideal for ML and data exploration. Modern architectures use **data lakehouses** (Delta Lake, Iceberg) combining both benefits: cheap object storage with ACID transactions and schema enforcement.
+
+A **data warehouse** stores structured, processed data optimized for BI and analytics using schema-on-write. It's ideal for consistent, high-quality reporting. 
+
+A **data lake** stores raw data in native format (structured, semi-structured, unstructured) using schema-on-read, ideal for ML and data exploration. 
+
+Modern architectures use **data lakehouses** (Delta Lake, Iceberg) combining both benefits: cheap object storage with ACID transactions and schema enforcement.
 
 ### Q2: Explain SCD Type 2 with an example.
 
@@ -1027,7 +1032,10 @@ This maintains complete audit trail for regulatory compliance and historical ana
 ### Q3: Star schema vs Snowflake schema - when to use which?
 
 **Answer:**
-**Star schema** (denormalized dimensions): Use for most data warehouses. Fewer joins = faster queries. Better for BI tools. Redundancy is acceptable. **Snowflake schema** (normalized dimensions): Use when dimension tables are very large and storage cost matters. Better data integrity. Use when updates to dimension attributes are frequent. In practice, star schema is preferred 90% of the time.
+
+**Star schema** (denormalized dimensions): Use for most data warehouses. Fewer joins = faster queries. Better for BI tools. Redundancy is acceptable. 
+
+**Snowflake schema** (normalized dimensions): Use when dimension tables are very large and storage cost matters. Better data integrity. Use when updates to dimension attributes are frequent. In practice, star schema is preferred 90% of the time.
 
 ### Q4: What are the different types of fact tables?
 
@@ -1040,7 +1048,11 @@ This maintains complete audit trail for regulatory compliance and historical ana
 ### Q5: Inmon vs Kimball - which approach is better?
 
 **Answer:**
-Neither is universally better - it depends on context. **Inmon** (top-down) is better for large enterprises needing a single source of truth with strong governance, but requires more upfront investment. **Kimball** (bottom-up) is better for organizations needing faster time-to-value with well-defined business processes, using conformed dimensions for integration. Most modern organizations use a hybrid approach.
+Neither is universally better - it depends on context. 
+
+**Inmon** (top-down) is better for large enterprises needing a single source of truth with strong governance, but requires more upfront investment. 
+
+**Kimball** (bottom-up) is better for organizations needing faster time-to-value with well-defined business processes, using conformed dimensions for integration. Most modern organizations use a hybrid approach.
 
 ---
 
