@@ -290,29 +290,646 @@ Result: Data is protected at every stage
 | On-premise or hybrid deployments | Self-hosted option available |
 | Complex access policies | Fine-grained ACL with multiple auth methods |
 
-### Key Management
+---
+
+### Real-World Banking Scenario: AWS KMS
+
+**Use Case:** A bank needs to encrypt sensitive customer data (account numbers, SSNs, transaction history) stored in AWS S3 and RDS databases.
 
 ```python
-# AWS KMS
 import boto3
+from datetime import datetime
 
-kms = boto3.client('kms')
+# Initialize KMS client
+kms = boto3.client('kms', region_name='us-east-1')
 
-# Create key
-response = kms.create_key(
-    Description='Data warehouse encryption key',
-    Tags=[{'TagKey': 'Environment', 'TagValue': 'Production'}]
+# ============================================================
+# SCENARIO 1: Create encryption keys for different data types
+# ============================================================
+
+# Create master key for customer PII
+pii_key = kms.create_key(
+    Description='Master key for customer PII (SSN, account numbers)',
+    KeyUsage='ENCRYPT_DECRYPT',
+    Origin='AWS_KMS',
+    Tags=[
+        {'TagKey': 'DataClassification', 'TagValue': 'PII'},
+        {'TagKey': 'Environment', 'TagValue': 'Production'},
+        {'TagKey': 'Compliance', 'TagValue': 'PCI-DSS'}
+    ]
+)
+pii_key_id = pii_key['KeyMetadata']['KeyId']
+print(f"PII Key created: {pii_key_id}")
+
+# Create key for transaction data
+txn_key = kms.create_key(
+    Description='Master key for transaction data',
+    Tags=[
+        {'TagKey': 'DataClassification', 'TagValue': 'Confidential'},
+        {'TagKey': 'Environment', 'TagValue': 'Production'}
+    ]
+)
+txn_key_id = txn_key['KeyMetadata']['KeyId']
+print(f"Transaction Key created: {txn_key_id}")
+
+# Create alias for easy reference
+kms.create_alias(
+    AliasName='alias/bank-pii-master-key',
+    TargetKeyId=pii_key_id
 )
 
-# Encrypt
-encrypted = kms.encrypt(
-    KeyId=response['KeyMetadata']['KeyId'],
-    Plaintext='sensitive-data'
+kms.create_alias(
+    AliasName='alias/bank-txn-master-key',
+    TargetKeyId=txn_key_id
 )
 
-# Decrypt
-decrypted = kms.decrypt(CiphertextBlob=encrypted['CiphertextBlob'])
+# ============================================================
+# SCENARIO 2: Encrypt sensitive customer data
+# ============================================================
+
+def encrypt_customer_data(customer_data):
+    """Encrypt customer PII before storing in database."""
+    
+    # Encrypt account number
+    account_encrypted = kms.encrypt(
+        KeyId='alias/bank-pii-master-key',
+        Plaintext=customer_data['account_number'].encode(),
+        EncryptionContext={
+            'Purpose': 'AccountNumberEncryption',
+            'CustomerId': customer_data['customer_id']
+        }
+    )
+    
+    # Encrypt SSN
+    ssn_encrypted = kms.encrypt(
+        KeyId='alias/bank-pii-master-key',
+        Plaintext=customer_data['ssn'].encode(),
+        EncryptionContext={
+            'Purpose': 'SSNEncryption',
+            'CustomerId': customer_data['customer_id']
+        }
+    )
+    
+    return {
+        'customer_id': customer_data['customer_id'],
+        'account_number_encrypted': account_encrypted['CiphertextBlob'],
+        'ssn_encrypted': ssn_encrypted['CiphertextBlob'],
+        'account_number_key_id': account_encrypted['KeyId'],
+        'ssn_key_id': ssn_encrypted['KeyId']
+    }
+
+# Example usage
+customer = {
+    'customer_id': 'CUST-001',
+    'account_number': '1234567890',
+    'ssn': '123-45-6789'
+}
+
+encrypted_customer = encrypt_customer_data(customer)
+print(f"Encrypted account: {encrypted_customer['account_number_encrypted'][:50]}...")
+
+# ============================================================
+# SCENARIO 3: Decrypt data for authorized access
+# ============================================================
+
+def decrypt_customer_data(encrypted_data):
+    """Decrypt customer PII for authorized access."""
+    
+    # Decrypt account number
+    account_decrypted = kms.decrypt(
+        CiphertextBlob=encrypted_data['account_number_encrypted'],
+        EncryptionContext={
+            'Purpose': 'AccountNumberEncryption',
+            'CustomerId': encrypted_data['customer_id']
+        }
+    )
+    
+    # Decrypt SSN
+    ssn_decrypted = kms.decrypt(
+        CiphertextBlob=encrypted_data['ssn_encrypted'],
+        EncryptionContext={
+            'Purpose': 'SSNEncryption',
+            'CustomerId': encrypted_data['customer_id']
+        }
+    )
+    
+    return {
+        'customer_id': encrypted_data['customer_id'],
+        'account_number': account_decrypted['Plaintext'].decode(),
+        'ssn': ssn_decrypted['Plaintext'].decode()
+    }
+
+# ============================================================
+# SCENARIO 4: Encrypt data in S3 (Server-Side Encryption)
+# ============================================================
+s3 = boto3.client('s3')
+
+# Upload bank statements with encryption
+s3.put_object(
+    Bucket='bank-statements-bucket',
+    Key='statements/2024/01/CUST-001-statement.pdf',
+    Body=pdf_content,
+    ServerSideEncryption='aws:kms',
+    SSEKMSKeyId='alias/bank-pii-master-key',
+    Metadata={
+        'customer-id': 'CUST-001',
+        'statement-month': '2024-01'
+    }
+)
+
+# ============================================================
+# SCENARIO 5: Key rotation for compliance
+# ============================================================
+
+# Enable automatic key rotation (rotates every year)
+kms.enable_key_rotation(KeyId=pii_key_id)
+print("Key rotation enabled for PII key")
+
+# Manual key rotation (if needed)
+kms.schedule_key_deletion(
+    KeyId='old-key-id',
+    PendingWindowInDays=7
+)
+
+# ============================================================
+# SCENARIO 6: Audit key usage for compliance
+# ============================================================n
+# CloudTrail logs all KMS API calls automatically
+# Query with CloudTrail API
+cloudtrail = boto3.client('cloudtrail')
+
+response = cloudtrail.lookup_events(
+    LookupAttributes=[
+        {
+            'AttributeKey': 'EventName',
+            'AttributeValue': 'Decrypt'
+        }
+    ],
+    StartTime=datetime(2024, 1, 1),
+    EndTime=datetime(2024, 1, 31),
+    MaxResults=100
+)
+
+for event in response['Events']:
+    print(f"Decrypt event: {event['EventTime']} - {event['Username']}")
 ```
+
+**Banking Compliance Notes:**
+- KMS keys are stored in FIPS 140-2 Level 2 validated HSMs
+- All key usage is logged to CloudTrail for audit
+- Encryption context provides additional authenticated data
+- Key rotation ensures compliance with PCI DSS requirements
+
+---
+
+### Real-World Banking Scenario: HashiCorp Vault
+
+**Use Case:** A bank needs to manage database credentials, API keys, and certificates for its banking applications across multiple environments.
+
+---
+
+#### Scenario 1: Store Static Secrets (API Keys, Passwords)
+
+**What it does:** Stores long-lived secrets like API keys, passwords, and configuration values in Vault's encrypted KV (Key-Value) secrets engine.
+
+**Why use it:** Instead of hardcoding secrets in config files or environment variables (which can be leaked), store them securely in Vault with access controls and audit logging.
+
+**Banking Example:**
+- Core banking API key for transaction processing
+- Payment gateway credentials (Stripe, Square, etc.)
+- Email service passwords for sending notifications
+- Third-party service API keys
+
+```python
+import hvac  # HashiCorp Vault Python client
+import json
+from datetime import datetime
+
+# Initialize Vault client
+client = hvac.Client(
+    url='https://vault.bank.internal:8200',
+    token='your-vault-token'  # Or use AppRole auth
+)
+
+# Store core banking API key
+client.secrets.kv.v2.create_or_update_secret(
+    path='banking/core-banking-api',
+    secret={
+        'api_key': 'cb-api-key-xyz123',
+        'api_secret': 'super-secret-api-secret',
+        'base_url': 'https://core-bank.internal/api/v2',
+        'timeout_seconds': 30,
+        'retry_count': 3
+    },
+    mount_point='secret'
+)
+
+# Store payment gateway credentials
+client.secrets.kv.v2.create_or_update_secret(
+    path='banking/payment-gateway',
+    secret={
+        'merchant_id': 'MERCH-001',
+        'api_key': 'pg-api-key-abc456',
+        'api_secret': 'pg-secret-def789',
+        'webhook_secret': 'webhook-ghi012',
+        'environment': 'production'
+    },
+    mount_point='secret'
+)
+
+# Store email service credentials
+client.secrets.kv.v2.create_or_update_secret(
+    path='banking/email-service',
+    secret={
+        'smtp_host': 'smtp.bank.internal',
+        'smtp_port': 587,
+        'username': 'notifications@bank.com',
+        'password': 'email-password-secure',
+        'from_address': 'notifications@bank.com'
+    },
+    mount_point='secret'
+)
+
+print("Static secrets stored in Vault")
+```
+
+---
+
+#### Scenario 2: Dynamic Database Credentials
+
+**What it does:** Vault generates **temporary, unique database credentials** for each application instance or user. These credentials automatically expire after a set time (TTL).
+
+**Why use it:** Instead of sharing one database password across all applications (risky!), each app gets its own credentials that:
+- Expire automatically (no need to rotate manually)
+- Are unique (if compromised, only one app is affected)
+- Are audit-logged (know who accessed what)
+
+**Banking Example - Different TTLs for Different Access Levels:**
+
+| Role | Access Level | TTL (Time-to-Live) | Use Case |
+|------|-------------|-------------------|----------|
+| `banking-app-read` | SELECT only | **2 hours** | Dashboard queries, reports |
+| `banking-app-write` | SELECT, INSERT, UPDATE | **1 hour** | Transaction processing |
+| `banking-app-admin` | Full access | **30 minutes** | Schema changes, migrations |
+| `banking-report-read` | SELECT only | **4 hours** | End-of-day reports |
+
+```python
+# Configure MySQL secrets engine
+client.secrets.database.configure(
+    name='banking-mysql',
+    plugin_name='mysql-database-plugin',
+    connection_url='{{username}}:{{password}}@bank-db.internal:3306/banking',
+    allowed_roles=['banking-app-read', 'banking-app-write', 'banking-app-admin'],
+    username='vault-admin',
+    password='vault-admin-password'
+)
+
+# Create role for READ-ONLY access (expires in 2 hours)
+client.secrets.database.create_role(
+    name='banking-app-read',
+    db_name='banking-mysql',
+    default_ttl='2h',   # Credentials expire after 2 hours
+    max_ttl='24h',      # Maximum allowed TTL
+    creation_statements=[
+        "CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}';",
+        "GRANT SELECT ON banking.* TO '{{name}}'@'%';",
+    ]
+)
+
+# Create role for READ-WRITE access (expires in 1 hour)
+client.secrets.database.create_role(
+    name='banking-app-write',
+    db_name='banking-mysql',
+    default_ttl='1h',   # Shorter TTL for write access
+    max_ttl='2h',
+    creation_statements=[
+        "CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}';",
+        "GRANT SELECT, INSERT, UPDATE ON banking.* TO '{{name}}'@'%';",
+        "GRANT DELETE ON banking.transactions TO '{{name}}'@'%';",
+    ]
+)
+
+# Create role for ADMIN access (expires in 30 minutes)
+client.secrets.database.create_role(
+    name='banking-app-admin',
+    db_name='banking-mysql',
+    default_ttl='30m',  # Very short TTL for admin access
+    max_ttl='1h',
+    creation_statements=[
+        "CREATE USER '{{name}}'@'%' IDENTIFIED BY '{{password}}';",
+        "GRANT ALL PRIVILEGES ON banking.* TO '{{name}}'@'%';",
+    ]
+)
+
+# Generate READ credentials (valid for 2 hours)
+read_credentials = client.secrets.database.generate_credentials(
+    name='banking-app-read'
+)
+
+print(f"Generated READ DB credentials:")
+print(f"  Username: {read_credentials['data']['username']}")
+print(f"  Password: {read_credentials['data']['password']}")
+print(f"  TTL: {read_credentials['data']['ttl']} seconds ({read_credentials['data']['ttl'] // 3600} hours)")
+print(f"  Expires: Auto-expires after 2 hours!")
+
+# Generate WRITE credentials (valid for 1 hour)
+write_credentials = client.secrets.database.generate_credentials(
+    name='banking-app-write'
+)
+
+print(f"\nGenerated WRITE DB credentials:")
+print(f"  Username: {write_credentials['data']['username']}")
+print(f"  TTL: {write_credentials['data']['ttl']} seconds ({write_credentials['data']['ttl'] // 60} minutes)")
+print(f"  Expires: Auto-expires after 1 hour!")
+```
+
+---
+
+#### Scenario 3: Dynamic AWS Credentials
+
+**What it does:** Vault generates **temporary AWS credentials** (access key, secret key, session token) that expire after a set time.
+
+**Why use it:** Instead of using long-lived IAM user credentials (risk of leakage), each application gets temporary credentials that:
+- Auto-expire (no manual rotation needed)
+- Have minimal permissions (least privilege)
+- Are unique per request (no shared credentials)
+
+**Banking Example - Different Access Levels:**
+
+| Role | AWS Permissions | TTL | Use Case |
+|------|----------------|-----|----------|
+| `bank-s3-reader` | S3 GetObject, ListBucket | **1 hour** | Read bank statements |
+| `bank-s3-writer` | S3 PutObject | **30 minutes** | Upload daily reports |
+| `bank-kms-user` | KMS Encrypt, Decrypt | **15 minutes** | Encrypt/decrypt sensitive data |
+| `bank-lambda-invoker` | Lambda InvokeFunction | **2 hours** | Trigger fraud detection |
+
+```python
+# Configure AWS secrets engine
+client.secrets.aws.configure(
+    access_key='vault-aws-access-key',
+    secret_key='vault-aws-secret-key',
+    region='us-east-1'
+)
+
+# Create role for S3 READ access (expires in 1 hour)
+client.secrets.aws.create_role(
+    name='bank-s3-reader',
+    credential_type='assumed_role',
+    default_ttl='1h',   # Credentials expire after 1 hour
+    max_ttl='4h',
+    policy_document={
+        'Version': '2012-10-17',
+        'Statement': [{
+            'Effect': 'Allow',
+            'Action': ['s3:GetObject', 's3:ListBucket'],
+            'Resource': [
+                'arn:aws:s3:::bank-statements-bucket',
+                'arn:aws:s3:::bank-statements-bucket/*'
+            ]
+        }]
+    }
+)
+
+# Create role for KMS access (expires in 15 minutes)
+client.secrets.aws.create_role(
+    name='bank-kms-user',
+    credential_type='assumed_role',
+    default_ttl='15m',  # Very short for sensitive KMS operations
+    max_ttl='1h',
+    policy_document={
+        'Version': '2012-10-17',
+        'Statement': [{
+            'Effect': 'Allow',
+            'Action': ['kms:Encrypt', 'kms:Decrypt', 'kms:GenerateDataKey'],
+            'Resource': 'arn:aws:kms:us-east-1:123456789012:key/bank-key-id'
+        }]
+    }
+)
+
+# Generate temporary AWS credentials (valid for 1 hour)
+aws_credentials = client.secrets.aws.generate_credentials(
+    name='bank-s3-reader'
+)
+
+print(f"Generated AWS credentials:")
+print(f"  Access Key: {aws_credentials['data']['access_key']}")
+print(f"  Secret Key: {aws_credentials['data']['secret_key']}")
+print(f"  Session Token: {aws_credentials['data']['security_token'][:50]}...")
+print(f"  Expires: Auto-expires after 1 hour!")
+
+# Generate KMS credentials (valid for 15 minutes)
+kms_credentials = client.secrets.aws.generate_credentials(
+    name='bank-kms-user'
+)
+
+print(f"\nGenerated KMS credentials:")
+print(f"  TTL: Very short (15 minutes) for sensitive operations")
+```
+
+---
+
+#### Scenario 4: PKI/TLS Certificates
+
+**What it does:** Vault acts as a **Certificate Authority (CA)** and generates TLS certificates for internal services.
+
+**Why use it:** Instead of manually managing certificates (risky, expiration issues), Vault:
+- Auto-generates certificates with proper expiration
+- Provides short-lived certificates (1 year vs 3-5 years)
+- Centralizes certificate management
+- Enables automatic rotation
+
+**Banking Example - Certificate Types:**
+
+| Certificate | TTL | Use Case |
+|-------------|-----|----------|
+| Root CA | **10 years** | Trust anchor for internal PKI |
+| Intermediate CA | **5 years** | Issues leaf certificates |
+| API Server Cert | **1 year** | Banking API HTTPS |
+| Database Client Cert | **90 days** | mTLS for database connections |
+| Internal Service Cert | **1 year** | Service-to-service mTLS |
+
+```python
+# Configure PKI secrets engine
+client.secrets.pki.configure_tune(
+    mount_point='pki',
+    max_lease_ttl='87600h'  # 10 years for root CA
+)
+
+# Generate root CA (valid for 10 years)
+root_cert = client.secrets.pki.generate_root(
+    type='internal',
+    common_name='Bank Internal Root CA',
+    ttl='87600h'  # 10 years
+)
+
+# Issue certificate for banking API (valid for 1 year)
+api_cert = client.secrets.pki.generate_leaf(
+    name='banking-api-cert',
+    common_name='api.bank.internal',
+    alt_names=['api.bank.internal', 'api-internal.bank.internal'],
+    ttl='8760h'  # 1 year
+)
+
+print(f"Generated API certificate:")
+print(f"  Certificate: {api_cert['data']['certificate'][:100]}...")
+print(f"  Private Key: {api_cert['data']['private_key'][:50]}...")
+print(f"  Expires: 1 year from now")
+
+# Issue database client certificate (valid for 90 days)
+db_cert = client.secrets.pki.generate_leaf(
+    name='db-client-cert',
+    common_name='db-client.bank.internal',
+    ttl='2160h'  # 90 days
+)
+
+print(f"\nGenerated DB client certificate:")
+print(f"  Expires: 90 days from now (auto-rotate before expiry)")
+```
+
+---
+
+#### Scenario 5: Application Retrieves Secrets
+
+**What it does:** On application startup, retrieve all necessary secrets from Vault (static and dynamic).
+
+**Why use it:** Application never stores secrets in code or config files. All secrets come from Vault at runtime.
+
+**Banking Example - Application Startup Flow:**
+
+```
+1. App starts
+2. Authenticates with Vault (AppRole, Kubernetes, etc.)
+3. Retrieves static secrets (API keys)
+4. Generates dynamic DB credentials (valid for 2 hours)
+5. Generates dynamic AWS credentials (valid for 1 hour)
+6. App runs with fresh, unique credentials
+7. After TTL expires, app re-authenticates and gets new credentials
+```
+
+```python
+def get_banking_config(environment='production'):
+    """Application retrieves all necessary secrets from Vault."""
+    
+    # Get static secrets (API keys)
+    core_banking = client.secrets.kv.v2.read_secret_version(
+        path='banking/core-banking-api',
+        mount_point='secret'
+    )['data']['data']
+    
+    payment_gateway = client.secrets.kv.v2.read_secret_version(
+        path='banking/payment-gateway',
+        mount_point='secret'
+    )['data']['data']
+    
+    # Get dynamic database credentials (valid for 2 hours)
+    db_creds = client.secrets.database.generate_credentials(
+        name='banking-app-read'
+    )['data']
+    
+    # Get dynamic AWS credentials (valid for 1 hour)
+    aws_creds = client.secrets.aws.generate_credentials(
+        name='bank-s3-reader'
+    )['data']
+    
+    return {
+        'core_banking_api_key': core_banking['api_key'],
+        'payment_merchant_id': payment_gateway['merchant_id'],
+        'db_host': 'bank-db.internal',
+        'db_user': db_creds['username'],
+        'db_password': db_creds['password'],
+        'db_password_ttl': db_creds['ttl'],  # Seconds until expiry
+        'db_name': 'banking',
+        'aws_access_key': aws_creds['access_key'],
+        'aws_secret_key': aws_creds['secret_key'],
+        'aws_session_token': aws_creds['security_token']
+    }
+
+# Application startup
+config = get_banking_config()
+print(f"Application config loaded from Vault")
+print(f"  DB User: {config['db_user']}")
+print(f"  DB Password expires in: {config['db_password_ttl'] // 60} minutes")
+print(f"  AWS credentials expire in: 1 hour")
+print(f"  App will auto-refresh credentials before expiry")
+```
+
+---
+
+#### Scenario 6: Audit Logging for Compliance
+
+**What it does:** Vault logs **every secret access** - who accessed what, when, and whether it succeeded.
+
+**Why use it:** Banks must prove who accessed sensitive data for compliance (PCI DSS, SOX, GDPR). Vault provides complete audit trail.
+
+**Banking Example - What Gets Logged:**
+
+| Event | Logged Details |
+|-------|----------------|
+| Secret Read | User, timestamp, secret path, success/failure |
+| Secret Write | User, timestamp, secret path, old value (optional) |
+| Dynamic Credential Generation | User, role, TTL, database accessed |
+| Authentication | User, method (AppRole, LDAP, etc.), IP address |
+| Policy Change | Admin who changed policy, what changed |
+
+```python
+# Vault audit log is at /vault/audit/audit.log
+# Example log entry:
+{
+    "type": "response",
+    "auth": {
+        "client_token": "hmac-sha256:xxx",
+        "accessor": "hmac-sha256:yyy",
+        "display_name": "banking-app-prod",
+        "policies": ["banking-app-read"]
+    },
+    "request": {
+        "operation": "read",
+        "path": "database/creds/banking-app-read",
+        "remote_address": "10.0.1.50"
+    },
+    "time": "2024-01-15T10:30:00Z"
+}
+
+# Query audit logs for compliance
+print("\nAudit Log Entry:")
+print("  User: banking-app-prod")
+print("  Action: Read database credentials")
+print("  Path: database/creds/banking-app-read")
+print("  IP: 10.0.1.50")
+print("  Time: 2024-01-15T10:30:00Z")
+print("  Result: Success")
+```
+
+---
+
+### HashiCorp Vault: Complete Banking Summary
+
+| Scenario | What It Does | TTL/Expiration | Banking Use Case |
+|----------|-------------|----------------|------------------|
+| **Static Secrets** | Store API keys, passwords | Never expires (manual rotation) | Core banking API, payment gateway |
+| **Dynamic DB Credentials** | Generate temporary DB users | 30 min - 2 hours | App database access |
+| **Dynamic AWS Credentials** | Generate temporary AWS keys | 15 min - 4 hours | S3 access, KMS operations |
+| **PKI/TLS Certificates** | Generate internal certificates | 90 days - 10 years | API servers, mTLS |
+| **Secret Retrieval** | App gets secrets at runtime | Auto-refresh before expiry | Application startup |
+| **Audit Logging** | Log all secret access | Permanent | PCI DSS, SOX compliance |
+
+---
+
+### AWS KMS vs HashiCorp Vault: Banking Implementation Summary
+
+| Use Case | AWS KMS | HashiCorp Vault |
+|----------|---------|------------------|
+| **Encrypting stored data** | ✅ Primary use case | ❌ Not designed for this |
+| **Database credentials** | ❌ No | ✅ Dynamic, auto-rotating |
+| **API keys storage** | ❌ No | ✅ Secure storage with versioning |
+| **Certificate management** | ❌ No | ✅ PKI engine built-in |
+| **Cloud-native workloads** | ✅ Best choice | ⚠️ Works but not native |
+| **Multi-cloud/on-premise** | ❌ AWS only | ✅ Works everywhere |
+
+**Recommendation for Banks:**
+- Use **AWS KMS** for encrypting data at rest in AWS services
+- Use **HashiCorp Vault** for managing all application secrets and dynamic credentials
+- Implement **both** for comprehensive security
 
 ---
 
