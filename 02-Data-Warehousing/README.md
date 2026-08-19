@@ -233,6 +233,9 @@ Source -> ETL -> Staging -> Data Marts (Star Schema) -> BI
 
 ## 5. Dimensional Modeling
 
+### Resource datacamp.com
+https://www.datacamp.com/blog/star-schema-vs-snowflake-schema
+
 ### What is a Star Schema?
 
 A **star schema** is a way to organize data in a database, especially in data warehouses, to make it easier and faster to analyze. At the center, there's a main table called the **fact table**, which holds measurable data like sales or revenue. Around it are **dimension tables**, which add details like product names, customer info, or dates. This layout forms a star-like shape.
