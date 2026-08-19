@@ -5,6 +5,7 @@ A comprehensive roadmap to mastering data engineering and data warehousing, cove
 
 ---
 
+
 ## Table of Contents
 
 1. [Foundational Concepts](#1-foundational-concepts)

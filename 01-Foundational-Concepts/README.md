@@ -7,6 +7,12 @@
 4. [Storage Systems](#4-storage-systems)
 5. [Data Lifecycle Management](#5-data-lifecycle-management)
 6. [Data Architecture Principles](#6-data-architecture-principles)
+7. [Data Quality Fundamentals](#7-data-quality-fundamentals)
+8. [Real-World Scenarios](#8-real-world-scenarios)
+9. [Banking Examples](#9-banking-examples)
+10. [E-Commerce Examples](#10-e-commerce-examples)
+11. [Hands-On Exercises](#11-hands-on-exercises)
+12. [Interview Questions](#12-interview-questions)
 
 ---
 
@@ -25,6 +31,8 @@ Structured data is highly organized information that fits neatly into a predefin
 
 **Examples:** Database tables, spreadsheets, CSV files with consistent columns.
 
+**Tools:** PostgreSQL, MySQL, Amazon Redshift, Google BigQuery, Snowflake, Apache Hive
+
 ### 1.2 Semi-Structured Data
 
 Semi-structured data does not conform to rigid table structures but contains tags, markers, or keys that provide organizational hierarchy. It is flexible and schema-free or schema-on-read.
@@ -38,6 +46,8 @@ Semi-structured data does not conform to rigid table structures but contains tag
 
 **Examples:** JSON, XML, YAML, email (headers are structured, body is unstructured), log files with key-value pairs.
 
+**Tools:** MongoDB, Elasticsearch, Apache Cassandra, Couchbase
+
 ### 1.3 Unstructured Data
 
 Unstructured data has no predefined format or organization. It is the most abundant type of data (estimated 80-90% of all data) but also the most challenging to analyze.
@@ -50,6 +60,8 @@ Unstructured data has no predefined format or organization. It is the most abund
 - Rich in information but hard to extract
 
 **Examples:** Text documents, images, videos, audio files, PDFs, social media posts, satellite imagery.
+
+**Tools:** Apache Tika, AWS Rekognition, Google Cloud Vision, OpenCV
 
 ### Comparison Table
 
@@ -74,11 +86,15 @@ Unstructured data has no predefined format or organization. It is the most abund
 - **Cons:** No data type enforcement, no schema, no nested structures, ambiguous with commas in data
 - **Use Case:** Data exchange between systems, simple data exports
 
+**Tools:** pandas, Apache Airflow (for ETL), dbt (for transformations)
+
 #### JSON (JavaScript Object Notation)
 - **Structure:** Key-value pairs with nested objects and arrays
 - **Pros:** Human-readable, supports nested data, widely supported in web APIs
 - **Cons:** Verbose (high storage overhead), slow to parse, no schema enforcement
 - **Use Case:** API responses, configuration files, web applications
+
+**Tools:** Apache Kafka (Avro/JSON), Confluent Schema Registry, Apache NiFi
 
 #### XML (eXtensible Markup Language)
 - **Structure:** Tag-based hierarchical document with attributes and elements
@@ -100,11 +116,15 @@ Unstructured data has no predefined format or organization. It is the most abund
 - **Cons:** Not human-readable, write-heavy workloads slower
 - **Use Case:** Analytics workloads, data lake storage, columnar queries
 
+**Tools:** Apache Spark, Databricks, AWS Athena, Google BigQuery
+
 #### Apache ORC (Optimized Row Columnar)
 - **Structure:** Column-oriented with built-in indexes (bloom filters, min/max statistics)
 - **Pros:** Built-in indexes, excellent compression, ACID transactions support (with Hive)
 - **Cons:** Primarily optimized for Hive ecosystem
 - **Use Case:** Hive-based analytics, large-scale data warehousing
+
+**Tools:** Apache Hive, Apache Spark, Trino (PrestoSQL)
 
 #### Apache Avro
 - **Structure:** Row-oriented binary format with embedded schema (JSON)
@@ -112,11 +132,15 @@ Unstructured data has no predefined format or organization. It is the most abund
 - **Cons:** Not columnar (slower analytics), less compression than Parquet
 - **Use Case:** Kafka message serialization, data lake ingestion, streaming pipelines
 
+**Tools:** Apache Kafka, Confluent Platform, Apache Flink
+
 #### Protocol Buffers (Protobuf)
 - **Structure:** Binary serialization with .proto schema definition
 - **Pros:** Extremely fast, compact, strong typing, backward/forward compatible
 - **Cons:** Not human-readable, requires schema compilation
 - **Use Case:** gRPC services, high-performance messaging, internal APIs
+
+**Tools:** gRPC, Envoy Proxy, Istio
 
 ### Format Comparison
 
@@ -263,6 +287,8 @@ Object storage stores data as objects (blob + metadata + unique ID) rather than 
 
 **Examples:** Amazon S3, Azure Blob Storage, Google Cloud Storage, MinIO
 
+**Tools for Data Lakes:** Delta Lake, Apache Iceberg, Apache Hudi
+
 ### 4.3 Block Storage
 
 Block storage divides data into fixed-size blocks, each with a unique address. The operating system manages the file system on top.
@@ -274,6 +300,8 @@ Block storage divides data into fixed-size blocks, each with a unique address. T
 - Requires a file system or application to interpret
 
 **Examples:** AWS EBS, Azure Managed Disks, Google Persistent Disk
+
+**Tools:** Amazon RDS, Google Cloud SQL, Azure SQL Database
 
 ### 4.4 Storage Comparison
 
@@ -360,6 +388,8 @@ Source Systems          Transformations         Destination
 - Impact analysis before changes
 - Regulatory compliance (GDPR, SOX)
 - Trust and transparency in data
+
+**Tools:** Apache Atlas, Amundsen, DataHub, OpenLineage, Marquez
 
 ---
 
@@ -487,6 +517,8 @@ A decentralized, domain-oriented approach to data architecture where each busine
 3. Self-serve data platform
 4. Federated computational governance
 
+**Tools:** dbt (data transformations), Dagster (orchestration), DataHub (discovery)
+
 #### Data Fabric
 A centralized, technology-driven approach that uses metadata and AI/ML to automatically integrate and manage data across environments.
 
@@ -576,6 +608,81 @@ Transaction Sources        Real-Time Processing      Storage & Analytics
 - Large cash deposits followed by wire transfers
 - Structuring patterns (just below reporting thresholds)
 
+---
+
+## 7. Data Quality Fundamentals
+
+### 7.1 What is Data Quality?
+
+Data quality measures how well data serves its intended purpose. Poor data quality costs organizations an average of $12.9 million annually (Gartner).
+
+### 7.2 Data Quality Dimensions
+
+| Dimension | Description | Example Issue |
+|-----------|-------------|---------------|
+| **Accuracy** | Data correctly represents real-world entities | Wrong customer address |
+| **Completeness** | All required data is present | Missing email field |
+| **Consistency** | Data is the same across systems | Different customer names in CRM vs billing |
+| **Timeliness** | Data is up-to-date | Stale inventory levels |
+| **Validity** | Data conforms to defined formats | Invalid email format |
+| **Uniqueness** | No duplicate records | Same customer stored twice |
+
+### 7.3 Data Quality Pipeline
+
+```
++-----------+    +-----------+    +-----------+    +-----------+
+| Profile   |--->| Validate  |--->| Cleanse   |--->| Monitor   |
+| (Discover)|    | (Rules)   |    | (Fix)     |    | (Alert)   |
++-----------+    +-----------+    +-----------+    +-----------+
+     |                |                |                |
+  Identify        Apply          Transform        Track
+  anomalies       constraints    & impute         SLAs
+```
+
+### 7.4 Data Validation Techniques
+
+```python
+import pandas as pd
+from great_expectations.core import ExpectationSuite
+from great_expectations.dataset import PandasDataset
+
+# Example: Data validation with Great Expectations
+def validate_customer_data(df):
+    """Validate customer data quality."""
+    ge_df = PandasDataset(df)
+    
+    # Check completeness
+    ge_df.expect_column_values_to_not_be_null("customer_id")
+    ge_df.expect_column_values_to_not_be_null("email")
+    
+    # Check uniqueness
+    ge_df.expect_column_values_to_be_unique("customer_id")
+    
+    # Check format validity
+    ge_df.expect_column_values_to_match_regex(
+        "email", r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+    )
+    
+    # Check range validity
+    ge_df.expect_column_values_to_be_between("age", min_value=0, max_value=150)
+    
+    # Check value set
+    ge_df.expect_column_values_to_be_in_set("status", ["active", "inactive", "pending"])
+    
+    return ge_df.validate()
+```
+
+### 7.5 Common Data Quality Tools
+
+| Tool | Type | Best For |
+|------|------|----------|
+| **Great Expectations** | Python library | Data validation, documentation, profiling |
+| **dbt tests** | SQL-based | Data transformations quality checks |
+| **Monte Carlo** | SaaS | Data observability, anomaly detection |
+| **Soda** | CLI/Library | Data quality checks, monitoring |
+| **Apache Griffin** | Open source | Data quality for big data |
+| **Deequ (AWS)** | Spark library | Data quality at scale |
+
 ### Example 2: Core Banking Data Warehouse
 
 **Challenge:** Consolidate data from multiple banking systems (deposits, loans, credit cards, wealth management) into a unified data warehouse for regulatory reporting and business analytics.
@@ -655,7 +762,196 @@ Data Sources              Processing           Applications
 
 ---
 
-## 10. Interview Questions
+## 11. Hands-On Exercises
+
+### Exercise 1: Data Format Conversion (Python)
+```python
+import pandas as pd
+import json
+import csv
+
+# Task: Convert between data formats
+
+def csv_to_json(csv_file, json_file):
+    """Convert CSV file to JSON."""
+    df = pd.read_csv(csv_file)
+    records = df.to_dict(orient='records')
+    with open(json_file, 'w') as f:
+        json.dump(records, f, indent=2)
+    print(f"Converted {len(records)} records")
+    return records
+
+def json_to_parquet(json_file, parquet_file):
+    """Convert JSON to Parquet for efficient storage."""
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+    df = pd.DataFrame(data)
+    df.to_parquet(parquet_file, engine='pyarrow', compression='snappy')
+    print(f"Parquet file size: {os.path.getsize(parquet_file) / 1024:.2f} KB")
+    return df
+
+# Practice: Create sample data and test conversions
+sample_data = [
+    {"id": 1, "name": "Alice", "amount": 1500.50, "date": "2024-01-15"},
+    {"id": 2, "name": "Bob", "amount": 2300.00, "date": "2024-01-16"},
+    {"id": 3, "name": "Charlie", "amount": 890.75, "date": "2024-01-17"}
+]
+```
+
+### Exercise 2: Data Quality Validation
+```python
+import pandas as pd
+import numpy as np
+
+# Task: Implement data quality checks
+
+def check_data_quality(df, rules):
+    """
+    Check data quality based on rules.
+    
+    Rules format:
+    {
+        'column_name': {
+            'not_null': True,
+            'unique': True,
+            'min': 0,
+            'max': 100,
+            'allowed_values': ['A', 'B', 'C']
+        }
+    }
+    """
+    issues = []
+    
+    for column, rule in rules.items():
+        if column not in df.columns:
+            issues.append(f"Column '{column}' not found")
+            continue
+        
+        if rule.get('not_null'):
+            null_count = df[column].isnull().sum()
+            if null_count > 0:
+                issues.append(f"{column}: {null_count} null values")
+        
+        if rule.get('unique'):
+            dup_count = df[column].duplicated().sum()
+            if dup_count > 0:
+                issues.append(f"{column}: {dup_count} duplicates")
+        
+        if 'min' in rule:
+            below_min = (df[column] < rule['min']).sum()
+            if below_min > 0:
+                issues.append(f"{column}: {below_min} values below min ({rule['min']})")
+        
+        if 'max' in rule:
+            above_max = (df[column] > rule['max']).sum()
+            if above_max > 0:
+                issues.append(f"{column}: {above_max} values above max ({rule['max']})")
+        
+        if 'allowed_values' in rule:
+            invalid = ~df[column].isin(rule['allowed_values'])
+            if invalid.sum() > 0:
+                issues.append(f"{column}: {invalid.sum()} invalid values")
+    
+    return issues
+
+# Test with sample data
+df = pd.DataFrame({
+    'id': [1, 2, 2, 4],  # Duplicate
+    'name': ['Alice', 'Bob', None, 'Dave'],  # Null
+    'age': [25, -5, 30, 200],  # Invalid range
+    'status': ['active', 'pending', 'invalid', 'active']  # Invalid value
+})
+
+rules = {
+    'id': {'not_null': True, 'unique': True},
+    'name': {'not_null': True},
+    'age': {'min': 0, 'max': 150},
+    'status': {'allowed_values': ['active', 'inactive', 'pending']}
+}
+
+print("Quality Issues Found:")
+for issue in check_data_quality(df, rules):
+    print(f"  - {issue}")
+```
+
+### Exercise 3: Schema Evolution (PySpark)
+```python
+from pyspark.sql import SparkSession
+from pyspark.sql.types import *
+
+# Task: Handle schema evolution with Parquet
+
+spark = SparkSession.builder \
+    .appName("Schema Evolution Demo") \
+    .getOrCreate()
+
+# Initial schema
+schema_v1 = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("name", StringType(), False),
+    StructField("amount", DoubleType(), True)
+])
+
+# Updated schema (new column added)
+schema_v2 = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("name", StringType(), False),
+    StructField("amount", DoubleType(), True),
+    StructField("currency", StringType(), True)  # New column
+])
+
+# Write data with schema v1
+df_v1 = spark.createDataFrame(
+    [(1, "Alice", 100.0), (2, "Bob", 200.0)],
+    schema_v1
+)
+df_v1.write.mode("overwrite").parquet("data/schema_evolution")
+
+# Read with schema evolution enabled
+df_read = spark.read.option("mergeSchema", "true").parquet("data/schema_evolution")
+df_read.show()
+```
+
+### Exercise 4: Data Lineage Tracking (SQL)
+```sql
+-- Task: Implement simple data lineage tracking
+
+-- Create lineage metadata table
+CREATE TABLE data_lineage (
+    pipeline_id VARCHAR(50),
+    source_table VARCHAR(100),
+    target_table VARCHAR(100),
+    transformation_type VARCHAR(50),
+    transformation_logic TEXT,
+    created_at TIMESTAMP,
+    created_by VARCHAR(50)
+);
+
+-- Log lineage for a transformation
+INSERT INTO data_lineage VALUES (
+    'pipeline_001',
+    'raw.transactions',
+    'staging.transactions_clean',
+    'cleanse',
+    'Removed duplicates, standardized date format, filtered null amounts',
+    CURRENT_TIMESTAMP,
+    'data_engineer_1'
+);
+
+-- Query lineage to understand data flow
+SELECT 
+    source_table,
+    target_table,
+    transformation_type,
+    transformation_logic
+FROM data_lineage
+WHERE target_table LIKE '%transactions%'
+ORDER BY created_at;
+```
+
+---
+
+## 12. Interview Questions
 
 ### Q1: What is the difference between structured, semi-structured, and unstructured data? Give examples.
 
@@ -686,6 +982,26 @@ I would design a lakehouse architecture: Ingest via Kafka for real-time needs, l
 
 ## Summary Checklist
 
+### Core Concepts
+- [ ] Understand differences between structured, semi-structured, and unstructured data
+- [ ] Know major data formats and when to use each
+- [ ] Understand serialization methods and their trade-offs
+- [ ] Be able to design storage architecture (file vs object vs block)
+- [ ] Know data lifecycle management principles
+- [ ] Understand ACID vs BASE and CAP theorem
+- [ ] Can design data mesh vs data fabric architectures
+
+### Modern Tools
+- [ ] Know key tools: dbt, Great Expectations, Apache Iceberg, Delta Lake
+- [ ] Understand data lineage tools (Apache Atlas, DataHub, OpenLineage)
+- [ ] Familiar with data quality frameworks
+
+### Practical Skills
+- [ ] Practice with real-world scenarios and examples
+- [ ] Complete coding exercises with Python and SQL
+- [ ] Understand data quality dimensions and validation techniques
+- [ ] Can implement schema evolution with Parquet
+
 - [ ] Understand differences between structured, semi-structured, and unstructured data
 - [ ] Know major data formats and when to use each
 - [ ] Understand serialization methods and their trade-offs
@@ -695,6 +1011,8 @@ I would design a lakehouse architecture: Ingest via Kafka for real-time needs, l
 - [ ] Can design data mesh vs data fabric architectures
 - [ ] Practice with real-world scenarios and examples
 - [ ] Complete coding exercises with Python and SQL
+- [ ] Understand data quality dimensions and validation techniques
+- [ ] Know modern data engineering tools (dbt, Great Expectations, Iceberg)
 
 ---
 
