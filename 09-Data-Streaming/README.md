@@ -268,6 +268,9 @@ env.setStateBackend(new RocksDBStateBackend("hdfs://checkpoints", true));
 
 ## 4. Lambda vs Kappa Architecture
 
+### Resource
+https://medium.com/towards-data-engineering/data-processing-architectures-lambda-vs-kappa-for-big-data-8cc9a7edeffd
+
 ### Lambda Architecture
 
 Lambda Architecture (coined by Nathan Marz) is a data processing architecture that combines batch and stream processing to handle massive quantities of data. It takes advantage of both batch and real-time processing methods.

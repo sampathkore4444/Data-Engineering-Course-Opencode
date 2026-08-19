@@ -10,3 +10,8 @@
 | **Kahan Data Solutions**          |         ⭐⭐⭐⭐½   | Data architecture + team practices    | kahandatasolutions.com              |
 | **Modern Data Engineering Guide** |         ⭐⭐⭐⭐⭐ | Structured learning                   | moderndataengineering.dev           |
 | **Data Vidhya**                   |          ⭐⭐⭐⭐   | Tutorials + interviews                | data-vidhya.com                     |
+
+
+https://www.datacamp.com/blog/star-schema-vs-snowflake-schema
+
+https://medium.com/towards-data-engineering/data-processing-architectures-lambda-vs-kappa-for-big-data-8cc9a7edeffd

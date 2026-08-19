@@ -96,7 +96,20 @@ df_gold.write.format("delta").mode("overwrite").save("/gold/customer_daily")
 
 ## 2. Data Mesh
 
-### Core Principles
+### What is Data Mesh?
+
+**Data Mesh** is a decentralized data architecture paradigm that treats data as a product owned by domain teams, rather than a centralized data team. It was introduced by Zhamak Dehghani.
+
+### Why Data Mesh?
+
+| Problem | Data Mesh Solution |
+|---------|-------------------|
+| Central data team is a bottleneck | Domain teams own their data |
+| Data quality issues | Data as a product with SLAs |
+| Slow time-to-insight | Self-serve platform for quick access |
+| Governance challenges | Federated computational governance |
+
+### Core Principles (Detailed)
 
 ```
 1. DOMAIN OWNERSHIP
@@ -113,6 +126,47 @@ df_gold.write.format("delta").mode("overwrite").save("/gold/customer_daily")
 4. FEDERATED COMPUTATIONAL GOVERNANCE
    Automated policies across domains
 ```
+
+| Principle | Description | Example |
+|-----------|-------------|--------|
+| **Domain Ownership** | Business teams own their data end-to-end | Marketing owns campaign data |
+| **Data as a Product** | Data must be discoverable, addressable, trustworthy | Campaign data has SLAs, documentation |
+| **Self-Serve Platform** | Common infrastructure for all domains | Shared storage, compute, governance tools |
+| **Federated Governance** | Automated policies across domains | Universal data quality standards |
+
+### Data Mesh Architecture
+
+```
++--------------------------------------------------+
+|              SELF-SERVE DATA PLATFORM             |
+|  Storage | Compute | Governance | Discovery      |
++--------------------------------------------------+
+                        |
+   +--------------------+--------------------+
+   |                    |                    |
++--v---------+  +------v-------+  +---------v--+
+| Marketing  |  |   Finance    |  | Operations |
+| Domain     |  |   Domain     |  | Domain     |
+|            |  |              |  |            |
+| +--------+ |  | +----------+ |  | +--------+ |
+| |Data    | |  | |Data      | |  | |Data    | |
+| |Product | |  | |Product   | |  | |Product | |
+| |- Camp. | |  | |- GL      | |  | |- Inv.  | |
+| |- Leads | |  | |- Budget  | |  | |- Ship  | |
+| +--------+ |  | +----------+ |  | +--------+ |
++------------+  +--------------+  +------------+
+```
+
+### When to Choose Data Mesh
+
+| Choose Data Mesh When | Avoid Data Mesh When |
+|----------------------|---------------------|
+| Large organization (1000+ employees) | Small team (< 50) |
+| Multiple business domains | Single business domain |
+| Domain experts available | Limited technical resources |
+| Decentralized data needs | Centralized reporting needs |
+| Long-term strategic investment | Quick implementation needed |
+| Central data team is a bottleneck | Data team is not overloaded |
 
 ### Data Mesh Architecture
 
@@ -162,9 +216,20 @@ df_gold.write.format("delta").mode("overwrite").save("/gold/customer_daily")
 
 ## 3. Data Fabric
 
-### Concept
+### What is Data Fabric?
 
-Data fabric uses metadata and AI/ML to automatically integrate and manage data across environments.
+**Data Fabric** is a data architecture approach that uses metadata and AI/ML to automatically integrate and manage data across hybrid and multi-cloud environments. It provides a unified layer that discovers, catalogs, and connects data across all environments.
+
+### Why Data Fabric?
+
+| Problem | Data Fabric Solution |
+|---------|---------------------|
+| Data scattered across clouds | Unified metadata layer |
+| Manual data discovery | AI-powered auto-discovery |
+| Complex data lineage | Automated lineage tracking |
+| Data governance challenges | Centralized policy automation |
+
+### How Data Fabric Works
 
 ```
 +--------------------------------------------------+
@@ -180,14 +245,35 @@ Data fabric uses metadata and AI/ML to automatically integrate and manage data a
 +------------+  +--------------+  +------------+
 ```
 
+### Data Fabric Key Components
+
+| Component | Description |
+|-----------|-------------|
+| **Metadata Collection** | Automatically discover and catalog data across all environments |
+| **Knowledge Graph** | Map relationships between data assets |
+| **AI/ML Automation** | Auto-classify, tag, and recommend data |
+| **Data Lineage** | Track data flow from source to consumption |
+| **Self-Service Discovery** | Enable users to find and understand data |
+
 ### Data Fabric vs Data Mesh
 
 | Aspect | Data Mesh | Data Fabric |
 |--------|-----------|-------------|
-| Approach | Decentralized, human-driven | Centralized, AI-driven |
-| Integration | Domain teams build products | Automated metadata-driven |
-| Governance | Federated policies | Centralized automation |
-| Best for | Large org with domain expertise | Complex multi-cloud environments |
+| **Approach** | Decentralized, human-driven | Centralized, AI-driven |
+| **Integration** | Domain teams build products | Automated metadata-driven |
+| **Governance** | Federated policies | Centralized automation |
+| **Best for** | Large org with domain expertise | Complex multi-cloud environments |
+| **Implementation** | Requires domain team maturity | Requires metadata infrastructure |
+
+### When to Use Data Fabric
+
+| Scenario | Use Data Fabric? | Why |
+|----------|------------------|-----|
+| Multi-cloud environment | ✅ Yes | Unified view across clouds |
+| Complex data landscape | ✅ Yes | AI-powered discovery and classification |
+| Need automated governance | ✅ Yes | Centralized policy automation |
+| Small, single-cloud | ❌ No | Overkill for simple environments |
+| Domain teams are mature | ⚠️ Consider Data Mesh instead | Data Mesh may be more appropriate |
 
 ---
 
