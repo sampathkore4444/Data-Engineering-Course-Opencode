@@ -62,56 +62,190 @@
 
 ## 2. Encryption
 
+### What is Encryption?
+
+**Encryption** is the process of converting data into a coded format that can only be read with the correct decryption key. It protects data from unauthorized access even if the storage介质 or network is compromised.
+
 ### Encryption at Rest
 
+**Encryption at Rest** protects data stored on disk (databases, files, backups, data lakes). The data is encrypted when written and decrypted when read.
+
+```
+How Encryption at Rest Works:
+
+Plaintext Data  -->  Encryption Algorithm  -->  Ciphertext (Encrypted)
+                         + Key                     Stored on Disk
+
+Ciphertext  -->  Decryption Algorithm  -->  Plaintext Data
+   (Read)            + Key                   (Used by Application)
+```
+
+#### Why Encryption at Rest?
+
+| Threat | Protection |
+|--------|------------|
+| **Physical theft** | Stolen hard drive is unreadable without key |
+| **Unauthorized access** | Database admin cannot read encrypted columns |
+| **Backup exposure** | Backups are encrypted even if copied |
+| **Compliance** | Meets GDPR, HIPAA, PCI DSS requirements |
+
+#### Banking Example - Account Data at Rest
+
 ```sql
--- PostgreSQL: pgcrypto extension
+-- PostgreSQL: Encrypt sensitive account data
 CREATE EXTENSION pgcrypto;
 
--- Encrypt column
-INSERT INTO customers (ssn_encrypted) 
-VALUES (pgp_sym_encrypt('123-45-6789', 'secret_key'));
+-- Bank account table with encrypted columns
+CREATE TABLE bank_accounts (
+    account_id SERIAL PRIMARY KEY,
+    account_number_encrypted BYTEA,  -- Encrypted account number
+    ssn_encrypted BYTEA,             -- Encrypted SSN
+    balance DECIMAL(15,2),           -- Plain (for queries)
+    customer_name VARCHAR(100),      -- Plain (non-sensitive)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
--- Decrypt
-SELECT pgp_sym_decrypt(ssn_encrypted, 'secret_key') FROM customers;
+-- Insert with encryption
+INSERT INTO bank_accounts (account_number_encrypted, ssn_encrypted, balance, customer_name)
+VALUES (
+    pgp_sym_encrypt('1234567890', 'bank_master_key'),  -- Account number
+    pgp_sym_encrypt('123-45-6789', 'bank_master_key'),  -- SSN
+    50000.00,
+    'John Smith'
+);
 
--- Redshift: Automatic encryption
-CREATE TABLE customers (
-    customer_id INT,
-    name VARCHAR(100),
-    ssn VARCHAR(20)
-) ENCODE AUTO;
-
--- BigQuery: Column-level encryption
+-- Query with decryption (authorized users only)
 SELECT 
-    customer_id,
-    DECRYPT_COLUMN(name, 'name', 'projects/key-ring/cryptoKeys/key') as decrypted_name
-FROM customers;
+    account_id,
+    pgp_sym_decrypt(account_number_encrypted, 'bank_master_key') as account_number,
+    pgp_sym_decrypt(ssn_encrypted, 'bank_master_key') as ssn,
+    balance,
+    customer_name
+FROM bank_accounts;
 ```
+
+#### AWS S3 Encryption Example
+
+```python
+import boto3
+
+s3 = boto3.client('s3')
+
+# Upload with server-side encryption
+s3.put_object(
+    Bucket='bank-data-lake',
+    Key='accounts/2024/01/transactions.parquet',
+    Body=parquet_data,
+    ServerSideEncryption='aws:kms',  # Use AWS KMS
+    SSEKMSKeyId='alias/bank-key'     # KMS key alias
+)
+
+# Download (decryption is automatic)
+response = s3.get_object(
+    Bucket='bank-data-lake',
+    Key='accounts/2024/01/transactions.parquet'
+)
+plaintext_data = response['Body'].read()  # Automatically decrypted
+```
+
+---
 
 ### Encryption in Transit
 
+**Encryption in Transit** protects data moving between systems (client to database, service to service, application to API). Uses TLS/SSL protocols.
+
+```
+How Encryption in Transit Works:
+
+Client  -->  TLS Handshake  -->  Encrypted Channel  -->  Server
+              (Negotiate)        (Secure Tunnel)      (Decrypt)
+
+Data flows through encrypted tunnel
+Protection: Network sniffing, Man-in-the-middle attacks
+```
+
+#### Why Encryption in Transit?
+
+| Threat | Protection |
+|--------|------------|
+| **Network sniffing** | Intercepted packets are unreadable |
+| **Man-in-the-middle** | Cannot intercept or modify data |
+| **Public WiFi** | Safe to use untrusted networks |
+| **Compliance** | PCI DSS requires TLS for card data |
+
+#### Banking Example - Secure Database Connection
+
 ```python
-# SSL/TLS for database connections
+# Python: Connect to bank database with TLS
 import psycopg2
 
+# Secure connection to bank database
 conn = psycopg2.connect(
-    host="warehouse.redshift.amazonaws.com",
-    port=5439,
-    dbname="analytics",
-    user="admin",
-    password="secret",
-    sslmode="require",
-    sslrootcert="/path/to/ca-certificate.crt"
+    host="bank-database.example.com",
+    port=5432,
+    dbname="banking",
+    user="app_service",
+    password="secure_password",
+    sslmode='verify-full',  # Require TLS + verify certificate
+    sslrootcert='/path/to/bank-ca-certificate.crt',
+    sslcert='/path/to/client-certificate.crt',
+    sslkey='/path/to/client-private-key.pem'
 )
 
-# Kafka SSL
-properties = {
-    'bootstrap.servers': 'kafka:9093',
-    'security.protocol': 'SSL',
-    'ssl.truststore.location': '/path/to/truststore.jks',
-    'ssl.keystore.location': '/path/to/keystore.jks'
-}
+# All queries are now encrypted in transit
+cursor = conn.cursor()
+cursor.execute("SELECT balance FROM accounts WHERE account_id = %s", (12345,))
+```
+
+#### Banking API Example
+
+```python
+# HTTPS API call to banking service
+import requests
+
+# Secure API call (TLS 1.3)
+response = requests.get(
+    'https://api.bank.com/accounts/12345/balance',
+    headers={
+        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIs...',
+        'Content-Type': 'application/json'
+    },
+    verify='/path/to/bank-ca-certificate.crt'  # Verify server certificate
+)
+
+# Response is decrypted automatically
+account_balance = response.json()
+```
+
+---
+
+### Encryption at Rest vs Encryption in Transit: Comparison
+
+| Aspect | Encryption at Rest | Encryption in Transit |
+|--------|-------------------|----------------------|
+| **When** | Data stored on disk | Data moving between systems |
+| **Protects Against** | Physical theft, unauthorized disk access | Network sniffing, MITM attacks |
+| **Technology** | AES-256, envelope encryption | TLS 1.2/1.3, SSL |
+| **Performance** | Minimal impact (encrypt/decrypt once) | Minimal impact (hardware acceleration) |
+| **Compliance** | GDPR, HIPAA, PCI DSS | PCI DSS, HIPAA |
+| **Example** | Encrypt database column | HTTPS connection to API |
+
+### Banking: Both Are Required
+
+```
+Complete Banking Security:
+
+User's Phone  -->  [TLS 1.3]  -->  Bank API  -->  [TLS 1.3]  -->  Database
+   (App)           (Encrypted        (Server)      (Encrypted      (AES-256
+                    in Transit)                     in Transit)     at Rest)
+
+1. User opens banking app
+2. App connects to bank API via HTTPS (TLS 1.3)
+3. API queries database (TLS 1.3)
+4. Database reads encrypted data (AES-256 at rest)
+5. Data flows back through encrypted channels
+
+Result: Data is protected at every stage
 ```
 
 ### Key Management Platforms
@@ -123,6 +257,38 @@ properties = {
 | **Google Cloud KMS** | Cloud | Cloud HSM, key rotation |
 | **HashiCorp Vault** | Self-hosted | Dynamic secrets, encryption |
 | **CyberArk** | Enterprise | Privileged access management |
+
+### AWS KMS vs HashiCorp Vault: Key Differences
+
+| Aspect | AWS KMS | HashiCorp Vault |
+|--------|---------|------------------|
+| **Primary Purpose** | Generates and manages encryption keys (customer master keys) to encrypt data directly inside AWS | Stores application secrets (passwords, API keys) and generates dynamic, temporary credentials for databases and services |
+| **Deployment** | Managed service (AWS cloud) | Self-hosted or HCP (HashiCorp Cloud Platform) |
+| **Key Storage** | Hardware Security Modules (HSMs) managed by AWS | Backend storage (Consul, Raft, etc.) |
+| **Secret Types** | Encryption keys only | Passwords, API keys, certificates, dynamic credentials |
+| **Dynamic Secrets** | ❌ No | ✅ Yes (generates temporary DB credentials) |
+| **Encryption** | ✅ Yes (envelope encryption) | ✅ Yes (Transit engine) |
+| **Cloud Integration** | Native AWS integration | Multi-cloud, works anywhere |
+| **Cost** | Per key + per API call | Free (open-source) or HCP pricing |
+
+### When to Use AWS KMS
+
+| Scenario | Why AWS KMS |
+|----------|-------------|
+| Encrypting data in S3, EBS, RDS | Native integration with AWS services |
+| Envelope encryption for applications | Generate data keys for client-side encryption |
+| AWS-native workloads | Seamless integration, managed HSM |
+| Compliance requirements (FIPS 140-2) | AWS KMS is FIPS certified |
+
+### When to Use HashiCorp Vault
+
+| Scenario | Why HashiCorp Vault |
+|----------|---------------------|
+| Multi-cloud environments | Works across AWS, GCP, Azure |
+| Dynamic database credentials | Generates temporary, rotatable credentials |
+| Centralized secret management | Single source of truth for all secrets |
+| On-premise or hybrid deployments | Self-hosted option available |
+| Complex access policies | Fine-grained ACL with multiple auth methods |
 
 ### Key Management
 
@@ -617,9 +783,22 @@ ORDER BY action_timestamp;
 
 **Answer:** 
 
-**Encryption at rest** protects data stored on disk (databases, files, backups). Uses algorithms like AES-256. Protects against physical theft or unauthorized disk access. 
+**Encryption at Rest** protects data stored on disk (databases, files, backups, data lakes).
+- **When:** Data is written to storage
+- **Technology:** AES-256, envelope encryption
+- **Protects Against:** Physical theft, unauthorized disk access, backup exposure
+- **Banking Example:** Encrypting account numbers and SSNs in the database so even a database admin cannot read them without the key
 
-**Encryption in transit** protects data moving between systems (client to database, service to service). Uses TLS/SSL. Protects against network sniffing and man-in-the-middle attacks. Both are required for comprehensive security. Never assume one covers the other - implement both.
+**Encryption in Transit** protects data moving between systems (client to database, service to service).
+- **When:** Data is transmitted over network
+- **Technology:** TLS 1.2/1.3, SSL
+- **Protects Against:** Network sniffing, man-in-the-middle attacks
+- **Banking Example:** Using HTTPS (TLS 1.3) when a user's banking app communicates with the bank's API server
+
+**Both are required for comprehensive security.** A banking application needs:
+1. TLS 1.3 for all API communications (in transit)
+2. AES-256 encryption for all stored sensitive data (at rest)
+3. Never assume one covers the other - implement both layers
 
 ### Q2: What is the difference between RBAC and ABAC?
 
