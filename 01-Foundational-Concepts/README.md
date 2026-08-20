@@ -733,6 +733,100 @@ A centralized, technology-driven approach that uses metadata and AI/ML to automa
 +----------------------------------------------------------+
 ```
 
+#### Banking Example: Data Mesh in Action
+
+**Scenario:** A large bank with Retail Banking, Corporate Banking, Wealth Management, and Risk & Compliance divisions struggles with a centralized data team that cannot keep up with demand. Each domain has unique data needs and compliance requirements.
+
+**Data Mesh Implementation:**
+```
++----------------------------------------------------------+
+|                    BANKING DATA MESH                       |
++----------------------------------------------------------+
+|                                                          |
+|  +------------------+  +------------------+  +----------+|
+|  | Retail Banking   |  | Corporate Banking|  |  Risk &  ||
+|  | Domain           |  | Domain           |  |Compliance||
+|  |                  |  |                  |  |  Domain  ||
+|  | Data Product:    |  | Data Product:    |  |          ||
+|  | - Customer 360   |  | - SME Lending    |  | Data     ||
+|  | - Transaction    |  | - Trade Finance  |  | Product: ||
+|  |   History        |  | - Cash Mgmt     |  | - Fraud  ||
+|  | - Product        |  |                  |  |   Alerts ||
+|  |   Holdings       |  | SLA: 99.9%      |  | - AML    ||
+|  |                  |  | freshness       |  |   Reports||
+|  | SLA: 99.9%      |  |                  |  | - Basel  ||
+|  | freshness       |  | Owner: Corp     |  |   III     ||
+|  |                  |  | Banking Data    |  |          ||
+|  | Owner: Retail    |  | Team            |  | SLA:     ||
+|  | Data Team        |  |                  |  | 99.99%   ||
+|  +--------+--------+  +--------+--------+  +----+-----+|
+|           |                    |                  |      |
+|           v                    v                  v      |
+|  +----------------------------------------------------+ |
+|  |         Self-Serve Data Platform                   | |
+|  |  - Data Catalog (DataHub)                         | |
+|  - Compute (Snowflake)                              | |
+|  |  - Governance (Unity Catalog)                     | |
+|  +----------------------------------------------------+ |
++----------------------------------------------------------+
+```
+
+**How it works in practice:**
+1. **Retail Banking team** owns customer transaction data. They publish a "Customer 360" data product with freshness SLA of 15 minutes. Other teams can discover and subscribe to this product via the data catalog.
+2. **Corporate Banking team** owns SME lending data. They publish an "SME Credit Risk" data product. The Risk team subscribes to it for compliance reporting.
+3. **Risk & Compliance team** owns fraud detection models. They publish "Real-Time Fraud Alerts" as a data product consumed by the operations team.
+4. **Self-serve platform** provides shared compute (Snowflake), storage (S3), and governance tools so each team can build independently.
+
+**Key benefit:** Instead of waiting 3 months for the central data team to build a report, each domain team builds and publishes their own data products in days.
+
+#### Banking Example: Data Fabric in Action
+
+**Scenario:** The same bank has data scattered across 15+ systems — core banking (mainframe), CRM (Salesforce), risk engine (custom), market data (Bloomberg), and regulatory systems. A metadata-driven approach is needed to unify access without moving all data.
+
+**Data Fabric Implementation:**
+```
++----------------------------------------------------------+
+|                   BANKING DATA FABRIC                      |
++----------------------------------------------------------+
+|                                                          |
+|  +----------------------------------------------------+ |
+|  |         Metadata & Knowledge Graph                 | |
+|  |  - Auto-discovered schemas from 15+ source systems | |
+|  |  - AI-classified PII (customer names, SSN, etc.)   | |
+|  |  - End-to-end lineage: source -> transform -> BI   | |
+|  +----------------------------------------------------+ |
+|                         |                                |
+|  +------+------+------+------+------+------+            |
+|  v      v      v      v      v      v      v            |
+|+----+ +----+ +----+ +----+ +----+ +----+ +----+        |
+|Core| |CRM | |Risk| |Mkt | |Reg | |Fraud| |ATM |        |
+|Bank| |    | |Eng | |Data| |Sys | |Det | |Logs |        |
+|+----+ +----+ +----+ +----+ +----+ +----+ +----+        |
++----------------------------------------------------------+
+```
+
+**How it works in practice:**
+1. **Auto-discovery:** The metadata layer automatically scans all 15 source systems, cataloging tables, columns, and relationships — no manual documentation needed.
+2. **Smart classification:** AI/ML models automatically detect and classify sensitive data (PII, PCI, PHI) across all systems, applying regulatory tags for GDPR, SOX, and Basel III.
+3. **Virtual integration:** Instead of physically moving data, a risk analyst queries across core banking + CRM + market data through a single SQL interface. The fabric optimizes the query and pulls data from each source in real-time.
+4. **Automated lineage:** When a regulator asks "where does this number come from?", the fabric traces the full lineage from the final report back to the source system, including every transformation applied.
+
+**Key benefit:** The bank avoids a 2-year data migration project. A risk analyst can run a cross-system query in minutes instead of waiting weeks for the data engineering team to build ETL pipelines.
+
+#### When to Choose Which?
+
+| Factor | Data Mesh | Data Fabric |
+|--------|-----------|-------------|
+| **Best for** | Organizations with strong domain teams | Organizations with diverse, legacy systems |
+| **Approach** | Decentralized (teams own their data) | Centralized (metadata-driven automation) |
+| **Implementation** | Requires organizational change | Technology-focused, less org change |
+| **Governance** | Federated (each domain enforces) | Automated (AI/ML classifies and governs) |
+| **Banking example** | Each division publishes data products | Metadata layer connects 15+ core systems |
+| **Time to value** | Months (requires culture shift) | Weeks (auto-discovery and cataloging) |
+| **Maintenance** | Ongoing per domain | Centralized, AI-assisted |
+
+> **In practice:** Many large banks use **both** — a Data Fabric to connect legacy systems and auto-govern data, combined with Data Mesh principles for new cloud-native domains. The fabric provides the technical foundation; the mesh provides the organizational model.
+
 ### 6.6 Data as a Product (DaaP)
 
 Treating data with the same rigor as a product:
@@ -1153,7 +1247,15 @@ Structured data follows a fixed schema with predefined columns and types (e.g., 
 ### Q2: When would you choose Parquet over CSV for storing analytical data?
 
 **Answer:** 
-Parquet is superior for analytics on multiple performance dimensions: **Read Performance** — columnar storage enables column pruning (only reads needed columns) and predicate pushdown (skips row groups that don't match filters), while CSV requires full table scans. **Write Performance** — CSV is faster to write (simple append), but Parquet's write overhead is justified for read-heavy workloads. **Query Efficiency** — Parquet queries are 10-100x faster due to vectorized execution and page-level metadata, while CSV has no indexing or pushdown. **File Size** — Parquet compresses 5-10x better than CSV due to columnar encoding (dictionary, run-length, delta encoding). For a data warehouse with billions of rows queried by specific columns, Parquet reduces storage costs by 70% and query times by 10x. CSV is only preferred for data exchange or when human readability matters.
+Parquet is superior for analytics on multiple performance dimensions: 
+
+**Read Performance** — columnar storage enables column pruning (only reads needed columns) and predicate pushdown (skips row groups that don't match filters), while CSV requires full table scans. 
+
+**Write Performance** — CSV is faster to write (simple append), but Parquet's write overhead is justified for read-heavy workloads. 
+
+**Query Efficiency** — Parquet queries are 10-100x faster due to vectorized execution and page-level metadata, while CSV has no indexing or pushdown. 
+
+**File Size** — Parquet compresses 5-10x better than CSV due to columnar encoding (dictionary, run-length, delta encoding). For a data warehouse with billions of rows queried by specific columns, Parquet reduces storage costs by 70% and query times by 10x. CSV is only preferred for data exchange or when human readability matters.
 
 ### Q3: Explain CAP Theorem and its implications for distributed data systems.
 
@@ -1172,7 +1274,15 @@ I would design a lakehouse architecture: Ingest via Kafka for real-time needs, l
 
 ### Q6: What is the difference between a data lake and a data warehouse? When would you use each?
 
-**Answer:** A data warehouse stores **structured, cleaned, and transformed** data optimized for analytical queries (BI, reporting). It uses **schema-on-write** — data must conform to a schema before loading. A data lake stores **raw data in its native format** (structured, semi-structured, unstructured) using **schema-on-read** — structure is applied at query time. Use a **data warehouse** when you need fast, reliable reporting with well-defined business metrics. Use a **data lake** when you need to store diverse raw data for ML, exploratory analysis, or when schemas aren't known upfront. Most modern architectures combine both.
+**Answer:** 
+
+A data warehouse stores **structured, cleaned, and transformed** data optimized for analytical queries (BI, reporting). It uses **schema-on-write** — data must conform to a schema before loading. 
+
+A data lake stores **raw data in its native format** (structured, semi-structured, unstructured) using **schema-on-read** — structure is applied at query time. 
+
+Use a **data warehouse** when you need fast, reliable reporting with well-defined business metrics. 
+
+Use a **data lake** when you need to store diverse raw data for ML, exploratory analysis, or when schemas aren't known upfront. Most modern architectures combine both.
 
 ### Q7: What is a data mart, and how does it differ from a data warehouse?
 
