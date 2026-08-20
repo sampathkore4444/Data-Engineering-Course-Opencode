@@ -874,6 +874,139 @@ When choosing between star and snowflake, consider:
 
 ## 6. Slowly Changing Dimensions (SCD)
 
+```
+Slowly Changing Dimensions
+
+Slowly Changing Dimensions (SCD) refer to the techniques used in data warehousing to manage and track changes in dimension attributes over time. Given that certain dimension attributes, like a customer’s address or a product’s description, can change without the need for a new unique identifier, SCDs ensure that historical data remains consistent and accurate. Various SCD types provide strategies to handle these changes, such as overwriting old data, adding new records, or maintaining a history of changes, enabling analysts to observe data trends and changes across timeframes accurately.
+
+Let’s delve into each of the SCD types:
+```
+
+
+### Type 0 — The passive method:
+```
+Type 0 treats dimensions as static and doesn’t track changes. Once an attribute is set, it remains unchanged throughout the dimension’s lifetime, regardless of changes in the source system.
+
+Example: Assume a student’s major at entry to college is stored. Even if the student changes majors later, the recorded major remains unchanged.
+
+Before:
+| Student ID  | Major.           |
+| - - - - - - | - - - - - - - - -|
+| 001         | Computer Science |
+
+
+After the student changes to "Mathematics":
+| Student ID  | Major            |
+| - - - - - - | - - - - - - - - -|
+| 001         | Computer Science |
+```
+
+
+### Type 1 — Overwriting the old value:
+```
+With Type 1, when a dimension attribute changes, the old value is simply overwritten with the new value. This method doesn’t keep any history of old values.
+
+Example: If a customer changes their address, the new address simply replaces the old one in the customer dimension table.
+
+
+Before:
+| Customer ID  | Address         |
+| - - - - - - -| - - - - - - - - |
+| 100          | 123 Main St.    |
+
+
+
+After the customer moves to "456 Elm St.":
+| Customer ID  | Address         |
+| - - - - - - -| - - - - - - - - |
+| 100          | 456 Elm St.     |
+```
+
+
+### Type 2 — Creating a new additional record:
+```
+In Type 2, when an attribute changes, a new record is added to the dimension table, and the old record is marked as outdated. This approach maintains a full history of attribute values.
+
+Example: When a product’s price changes, a new product record is created with the updated price, while the old record is flagged as inactive or is given an end date.
+
+Before:
+| Product ID  | Price  | Active  |
+| - - - - - - | - - - -| - - - - |
+| P001        | $10    | Yes     |
+
+
+After a price change to $12:
+| Product ID  | Price  | Active  |
+| - - - - - - | - - - -| - - - - |
+| P001        | $10    | No      |
+| P002        | $12    | Yes     |
+```
+
+
+### Type 3 — Adding a new column:
+```
+Type 3 adds a new column to track changes. When an attribute changes, the current value is moved to this new column, and the original column is overwritten with the new value. This method only maintains the previous value.
+
+Example: If an employee’s role changes, their previous role is stored in a “Previous Role” column, and the main “Role” column is updated with the new role.
+
+Before:
+| Employee ID  | Role       |
+| - - - - - - -| - - - - - -|
+| E001         | Developer  |
+
+
+After changing role to "Manager":
+| Employee ID  | Role     | Previous Role  |
+| - - - - - - -| - - - - -| - - - - - - - -|
+| E001         | Manager  | Developer      |
+```
+
+
+### Type 4 — Using historical table:
+```
+With Type 4, a separate history table is maintained. Whenever there’s a change, the current state of the dimension is written into the history table before the change is applied to the dimension table.
+
+Example: If a store’s location changes, before updating the main table, the current store record is pushed into a “Store History” table, preserving all details prior to the change.
+
+Before:
+
+| Store ID  | Location |
+| - - - - - | - - - - -|
+| S001      | Downtown |
+
+
+After relocating to "Uptown":
+Main Table:
+| Store ID  | Location |
+| - - - - - | - - - - -|
+| S001      | Uptown   |
+
+History Table:
+| Store ID  | Location |
+| - - - - - | - - - - -|
+| S001      | Downtown |
+```
+
+
+### Type 6 — Combine approaches of types 1,2,3 (1+2+3=6):
+```
+Type 6 is a hybrid approach, blending elements from Types 1, 2, and 3. It allows overwriting certain attributes (Type 1), adding new records for others (Type 2), and creating new columns for some (Type 3).
+
+Example: Consider a salesperson’s region. If they change regions, a new record is created (Type 2), their “Previous Region” is updated (Type 3), and some attributes like their contact number might just be overwritten if they get a new one (Type 1).
+
+Before:
+| Salesperson ID | Region | Previous Region | Contact Number |
+| - - - - - - - -| - - - -| - - - - - - - - | - - - - - - - -|
+| SP001          | East   | None            | 555–1234       |
+
+After changing to "West" region and new contact number "555–5678":
+| Salesperson ID | Region  | Previous Region | Contact Number |
+| - - - - - - - -| - - - - | - - - - - - - - | - - - - - - - -|
+| SP001          | East    | None            | 555–1234       |
+| SP002          | West    | East            | 555–5678       |
+These techniques help businesses choose the most appropriate way to handle historical data, depending on their specific analytical and operational needs.
+```
+
 SCD strategies handle how dimension attribute changes are tracked over time.
 
 ### SCD Type 0: Fixed
