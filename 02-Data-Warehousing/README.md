@@ -230,6 +230,380 @@ Source -> ETL -> Staging -> Data Marts (Star Schema) -> BI
 | Long-term strategic investment | Inmon |
 | Business processes well-defined | Kimball |
 
+
+The main difference is **where you start building the data warehouse** and **how you organize the data**.
+
+### High-level difference
+
+| Aspect            | **Bill Inmon — Top-Down**  | **Ralph Kimball — Bottom-Up**              |
+| ----------------- | -------------------------- | ------------------------------------------ |
+| Starting point    | Enterprise-wide DW         | Individual business areas                  |
+| Core DW           | **3NF / normalized**       | **Star schema / dimensional**              |
+| Approach          | Build enterprise DW first  | Build data marts first                     |
+| Data marts        | Created from Enterprise DW | Data marts are the primary building blocks |
+| Design focus      | Enterprise integration     | Business/user reporting                    |
+| Implementation    | Usually longer             | Usually faster                             |
+| Data redundancy   | Lower                      | Higher                                     |
+| Query performance | DW may require more joins  | Star schema is usually BI-friendly         |
+| Governance        | Strong centralized model   | More business-oriented                     |
+| Best suited for   | Large, complex enterprises | Fast analytics/BI delivery                 |
+
+---
+
+# Inmon — Top-Down
+
+Think:
+
+**"Let's build the company's central data warehouse first."**
+
+```text
+              ┌── Source: Core Banking
+              │
+              ├── Source: CRM
+              │
+              ├── Source: Cards
+              │
+              └── Source: Payments
+                       │
+                       ▼
+                    ETL/ELT
+                       │
+                       ▼
+          ┌──────────────────────────┐
+          │ Enterprise Data Warehouse│
+          │       3NF / Normalized   │
+          └──────────────────────────┘
+                       │
+              ┌────────┼────────┐
+              ▼        ▼        ▼
+           Finance   Risk     Customer
+           Mart      Mart       Mart
+              │        │        │
+              └────────┼────────┘
+                       ▼
+                      BI
+```
+
+The **Enterprise Data Warehouse is the central source of truth**.
+
+For example, you might have:
+
+```text
+CUSTOMER
+ACCOUNT
+PRODUCT
+BRANCH
+TRANSACTION
+LOAN
+```
+
+with relationships between them.
+
+The data is highly normalized.
+
+Then you create business-specific marts:
+
+```text
+Enterprise DW
+     │
+     ├── Finance Mart
+     ├── Risk Mart
+     ├── Marketing Mart
+     ├── Credit Card Mart
+     └── Customer Analytics Mart
+```
+
+### Inmon philosophy
+
+> **Enterprise DW → Data Marts**
+
+The enterprise model comes first.
+
+---
+
+# Kimball — Bottom-Up
+
+Kimball says:
+
+**"Let's solve business problems one by one using dimensional models, then integrate them."**
+
+For example, start with Sales:
+
+```text
+Sales System
+     │
+     ▼
+   ETL/ELT
+     │
+     ▼
+┌─────────────────┐
+│ Sales Data Mart │
+│                 │
+│ FactSales       │
+│ DimCustomer     │
+│ DimProduct      │
+│ DimDate         │
+└─────────────────┘
+     │
+     ▼
+    BI
+```
+
+Then build another area:
+
+```text
+Loan System
+     │
+     ▼
+   ETL/ELT
+     │
+     ▼
+┌─────────────────┐
+│ Loan Data Mart  │
+│                 │
+│ FactLoan        │
+│ DimCustomer     │
+│ DimProduct      │
+│ DimDate         │
+└─────────────────┘
+```
+
+Then another:
+
+```text
+Payments
+   │
+   ▼
+Payment Data Mart
+```
+
+Eventually:
+
+```text
+             ┌── Sales Mart
+             │
+             ├── Loan Mart
+             │
+             ├── Payment Mart
+             │
+             ├── Customer Mart
+             │
+             └── Finance Mart
+                    │
+                    ▼
+              Enterprise BI
+```
+
+The important concept is **conformed dimensions**.
+
+For example, all marts should use a consistent:
+
+```text
+DimCustomer
+DimDate
+DimProduct
+DimBranch
+```
+
+So you can answer:
+
+> "How much did customers borrow, spend on cards, and transfer through payments?"
+
+across multiple marts.
+
+---
+
+# The biggest technical difference
+
+Consider a banking transaction.
+
+### Inmon
+
+You might have a normalized structure:
+
+```text
+CUSTOMER
+   │
+   ├── CUSTOMER_ACCOUNT
+   │          │
+   │          ▼
+   │      ACCOUNT
+   │          │
+   │          ▼
+   │     TRANSACTION
+   │          │
+   │          ▼
+   │      PRODUCT
+```
+
+Lots of relationships and normalization.
+
+A query may require several joins.
+
+---
+
+### Kimball
+
+You would typically create:
+
+```text
+             DimCustomer
+                  │
+                  │
+DimDate ───── FactTransaction ───── DimAccount
+                  │
+                  │
+             DimProduct
+                  │
+                  │
+              DimBranch
+```
+
+This is a **star schema**.
+
+The central table is the **fact table**:
+
+```text
+FactTransaction
+----------------
+transaction_key
+customer_key
+account_key
+product_key
+branch_key
+date_key
+amount
+transaction_count
+```
+
+And surrounding it are dimensions:
+
+```text
+DimCustomer
+DimAccount
+DimProduct
+DimBranch
+DimDate
+```
+
+This is generally much easier for BI tools and analytical queries.
+
+---
+
+# Why are they called Top-Down and Bottom-Up?
+
+This is the easiest way to remember it.
+
+### Inmon = Top-Down
+
+Start at the top:
+
+```text
+Enterprise
+    ↓
+Enterprise DW
+    ↓
+Departments / Data Marts
+    ↓
+BI
+```
+
+### Kimball = Bottom-Up
+
+Start from individual business processes:
+
+```text
+Sales ──────┐
+Loans ──────┤
+Payments ───┤
+Cards ──────┤
+Risk ───────┘
+      ↓
+Integrated dimensional environment
+      ↓
+Enterprise BI
+```
+
+---
+
+# A very important point
+
+**Inmon ≠ 3NF only**
+
+and
+
+**Kimball ≠ Star Schema only.**
+
+The more important philosophical difference is:
+
+> **Inmon:** Build an integrated enterprise data warehouse first, then derive marts.
+
+> **Kimball:** Build dimensional data marts around business processes, using conformed dimensions to integrate them.
+
+The 3NF vs Star Schema distinction is a consequence of the typical approaches, but **it's not the entire definition**.
+
+---
+
+# Which one should you use today?
+
+For a modern banking analytics platform, I would usually recommend a **hybrid approach** rather than strictly following either methodology.
+
+For example:
+
+```text
+                 SOURCE SYSTEMS
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+       Oracle       MySQL        Kafka/CDC
+       FLEXCUBE     Payments      Events
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+                 Raw / Bronze
+                       │
+                       ▼
+                Integrated Layer
+                       │
+             ┌─────────┴─────────┐
+             ▼                   ▼
+        Enterprise/            Dimensional
+        3NF Layer              Gold Layer
+             │                   │
+             │            ┌──────┼──────┐
+             │            ▼      ▼      ▼
+             │          Risk   Finance Customer
+             │           Mart    Mart    Mart
+             │
+             └──────────────┐
+                            ▼
+                           BI
+```
+
+This gives you:
+
+**Inmon strengths**
+
+* Enterprise integration
+* Strong governance
+* Centralized source of truth
+* Historical consistency
+
+plus **Kimball strengths**
+
+* Fast BI queries
+* Star schemas
+* Business-friendly models
+* Easier Power BI/Tableau reporting
+
+### In one sentence:
+
+**Inmon asks: "How do we build the enterprise data warehouse?"**
+
+**Kimball asks: "How do we deliver useful analytics for each business process and integrate them?"**
+
+For **banking**, this distinction becomes especially important when you have **Core Banking + Cards + Loans + Payments + CRM + Risk + IFRS9 + Fraud** all feeding the same analytics platform.
+
 ---
 
 ## 5. Dimensional Modeling
