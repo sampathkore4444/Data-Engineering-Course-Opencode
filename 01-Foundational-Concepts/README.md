@@ -144,15 +144,23 @@ Unstructured data has no predefined format or organization. It is the most abund
 
 ### Format Comparison
 
-| Format | Type | Compression | Schema Evolution | Nested Data | Best For |
-|--------|------|-------------|-----------------|-------------|----------|
-| CSV | Text | None (gzip) | No | No | Data exchange |
-| JSON | Text | Low | Partial | Yes | APIs, configs |
-| XML | Text | Medium | Yes (XSD) | Yes | Enterprise |
-| Parquet | Columnar | Excellent | Yes | Yes | Analytics |
-| ORC | Columnar | Excellent | Yes | Yes | Hive analytics |
-| Avro | Row | Good | Yes | Yes | Streaming |
-| Protobuf | Row | Excellent | Yes | Yes | Microservices |
+| Format | Type | Compression | Schema Evolution | Nested Data | Read Performance | Write Performance | Query Efficiency | File Size (relative) | Best For |
+|--------|------|-------------|-----------------|-------------|-----------------|-------------------|-----------------|---------------------|----------|
+| CSV | Text | None (gzip) | No | No | Slow (full scan, no column pruning) | Fast (append-only, simple) | Low (no predicate pushdown, no indexing) | Large (1x baseline) | Data exchange |
+| JSON | Text | Low | Partial | Yes | Moderate (must parse entire document) | Fast (human-readable, easy to write) | Low (no columnar access, verbose parsing) | Large (~0.8x) | APIs, configs |
+| XML | Text | Medium | Yes (XSD) | Yes | Slow (tree traversal, verbose tags) | Slow (tag nesting, verbose output) | Low (XPath/XQuery complexity) | Very Large (~1.2x) | Enterprise |
+| Parquet | Columnar | Excellent (Dictionary Encoding) | Yes | Yes | Very Fast (column pruning, predicate pushdown, page-level skips) | Moderate (column reorganization, compression overhead) | Very High (reads only needed columns, vectorized execution) | Small (~0.1-0.2x) | Analytics |
+| ORC | Columnar | Excellent | Yes | Yes | Very Fast (built-in indexes, bloom filters, min/max stats) | Moderate (similar to Parquet, Hive overhead) | Very High (index-based skips, stripe-level pruning) | Small (~0.1-0.2x) | Hive analytics |
+| Avro | Row | Good (Binary Encoding) | Yes | Yes | Fast (sequential row reads, no parsing overhead) | Very Fast (append-friendly, compact writes) | Moderate (row-oriented, no column pruning) | Small (~0.15-0.3x) | Streaming |
+| Protobuf | Row | Excellent | Yes | Yes | Very Fast (compact binary, minimal parsing) | Very Fast (zero-copy deserialization possible) | Moderate (row-oriented, requires schema) | Smallest (~0.05-0.1x) | Microservices |
+
+#### Key Takeaways
+
+- **For analytics (OLAP):** Parquet and ORC dominate — columnar storage means queries only read the columns they need, dramatically reducing I/O. A query on 3 out of 50 columns reads ~6% of the data instead of 100%.
+- **For streaming/ingestion:** Avro and Protobuf win — row-oriented formats are faster to write and serialize, and they embed schemas for safe evolution.
+- **For human readability/debugging:** CSV and JSON — easy to inspect manually, but poor performance at scale.
+- **File size matters:** Columnar formats (Parquet/ORC) compress 5-10x better than text formats due to similar values in each column being stored together. Protobuf is smallest because it uses varint encoding and omits field names.
+- **Predicate pushdown** (Parquet/ORC) pushes WHERE clause filters down to the storage layer, skipping entire row groups that don't match — this is why analytical queries are 10-100x faster than full table scans on CSV.
 
 ---
 
@@ -314,29 +322,213 @@ Block storage divides data into fixed-size blocks, each with a unique address. T
 | Use Case | Shared files | Unstructured data | Databases |
 | Metadata | Limited | Rich | None |
 
-### 4.5 Data Lake vs Data Warehouse vs Data Lakehouse
+### 4.5 Data Warehouse
+
+A **Data Warehouse** is a centralized repository designed to store **structured, processed, and curated** data from multiple sources. It is optimized for **analytical querying and reporting**, not for day-to-day transaction processing.
+
+**Key Characteristics:**
+- Stores **cleaned, transformed, and integrated** data
+- Uses **schema-on-write** — structure is enforced before data is stored
+- Optimized for **read-heavy analytical workloads** (OLAP)
+- Supports complex queries, aggregations, and reporting
+- Provides a **single source of truth** for business intelligence
+- Typically follows a **dimensional model** (Star or Snowflake schema)
+
+**How It Works:**
+```
+Source Systems              ETL/ELT              Data Warehouse
++----------+            +----------+         +------------------+
+| CRM      |---Extract->|          |         |  Sales Fact      |
++----------+            | Transform|-------->|  Customer Dim    |
+| ERP      |---Extract->| & Load   |         |  Product Dim     |
++----------+            |          |         |  Time Dim        |
+| Logs     |---Extract->|          |         +------------------+
++----------+            +----------+                |
+                                              +----v----+
+                                              | BI/OLAP |
+                                              | Tools   |
+                                              +---------+
+```
+
+**Example Use Cases:**
+- Monthly sales reporting across all regions
+- Customer segmentation and lifetime value analysis
+- Regulatory and compliance reporting (Basel III, GDPR)
+- Executive dashboards and KPI tracking
+
+**Popular Tools:** Amazon Redshift, Google BigQuery, Snowflake, Azure Synapse, Apache Hive
+
+---
+
+### 4.6 Data Lake
+
+A **Data Lake** is a vast, centralized storage repository that holds **raw data in its native format** — structured, semi-structured, and unstructured — until it is needed for analysis.
+
+**Key Characteristics:**
+- Stores **raw, unprocessed** data in original format
+- Uses **schema-on-read** — structure is applied only when data is queried
+- Supports **all data types**: JSON, CSV, Parquet, images, videos, logs
+- **Low cost per GB** — typically built on object storage (S3, GCS, ADLS)
+- Designed for **flexibility** — store first, figure out the schema later
+- Ideal for **data science, machine learning, and exploratory analysis**
+
+**How It Works:**
+```
+Data Sources (All Types)            Data Lake              Consumers
++-------------------+          +------------------+    +-------------+
+| App Logs (JSON)   |--------->|                  |    | Data Science|
+| IoT Sensors       |--------->|  RAW ZONE        |--->| ML Training |
+| Database Dumps    |--------->|  (Parquet/JSON/  |    | Exploration |
+| Clickstream       |--------->|   CSV/etc.)      |    +-------------+
+| Social Media      |--------->|                  |    +-------------+
+| Images/Videos     |--------->|                  |--->| Data Eng    |
++-------------------+          +------------------+    | (Transform) |
+                                                       +-------------+
+```
+
+**Example Use Cases:**
+- Storing raw clickstream data for later behavioral analysis
+- Ingesting diverse IoT sensor data before defining a schema
+- Storing raw logs for security auditing and threat detection
+- Training machine learning models on unstructured data (images, text)
+
+**Popular Tools:** Amazon S3, Azure Data Lake Storage, Google Cloud Storage, Delta Lake, Apache Iceberg, Apache Hudi
+
+> **Important:** A data lake by itself is just a "data swamp" without proper governance, cataloging, and quality controls. Tools like AWS Lake Formation, Apache Atlas, and Delta Lake help bring order to raw data lakes.
+
+---
+
+### 4.7 Data Mart
+
+A **Data Mart** is a **subset of a data warehouse** that focuses on a **specific business line, department, or subject area**. It contains only the data relevant to a particular team's needs.
+
+**Key Characteristics:**
+- **Focused scope** — contains data for one department or business function
+- **Faster queries** — smaller dataset means quicker response times
+- **Easier to manage** — simpler to build, maintain, and secure
+- Typically built using a **Star Schema** for simplicity and performance
+- Can be **dependent** (sourced from a central data warehouse) or **independent** (sourced directly from operational systems)
+
+**Types of Data Marts:**
+
+| Type | Source | Use Case |
+|------|--------|----------|
+| **Dependent** | Central Data Warehouse | Large enterprises with an existing DW — pull curated data for each department |
+| **Independent** | Operational Source Systems | Small teams or quick-start projects — bypass the central DW |
+| **Logical** | Virtual views over the DW | No physical separation — use SQL views to provide department-specific slices |
+
+**How It Works:**
+```
+                     Data Warehouse (Central)
+                    +-----------------------+
+                    | Facts + Dimensions    |
+                    +-----------+-----------+
+                                |
+              +-----------------+------------------+
+              |                 |                  |
+      +-------v------+  +------v-------+  +------v--------+
+      | Sales Data   |  | Finance Data |  | Marketing     |
+      | Mart         |  | Mart         |  | Data Mart     |
+      |              |  |              |  |               |
+      | - Sales Rep  |  | - Budget     |  | - Campaigns   |
+      | - Region     |  | - P&L        |  | - Channels    |
+      | - Product    |  | - Forecast   |  | - Conversions |
+      +--------------+  +--------------+  +---------------+
+       BI Reports        CFO Dashboard    Marketing KPIs
+```
+
+**Example Use Cases:**
+- A **Sales Data Mart** with revenue, quotas, and pipeline data for the sales team
+- A **Finance Data Mart** with budget, P&L, and cost center data for the finance team
+- A **Marketing Data Mart** with campaign performance, conversion rates, and attribution
+
+**Popular Tools:** Same as data warehouses (Redshift, Snowflake, BigQuery) — data marts are typically created as schemas/databases within these platforms.
+
+---
+
+### 4.8 Data Lakehouse
+
+A **Data Lakehouse** is a modern architecture that **combines the flexibility of a data lake with the reliability of a data warehouse** — all in one platform.
+
+**Key Characteristics:**
+- **Open file formats** (Parquet, ORC) on cheap object storage
+- **ACID transactions** — data integrity guarantees like a warehouse
+- **Schema enforcement and evolution** — structured queries on raw data
+- **Supports both BI and ML** workloads in one system
+- **No data duplication** — same data serves analysts and data scientists
+- Uses **open table formats**: Delta Lake, Apache Iceberg, Apache Hudi
+
+**How It Works:**
+```
+Bronze (Raw)        Silver (Cleaned)       Gold (Business-Ready)
++-----------+       +---------------+      +-------------------+
+| Raw Data  |------>| Deduplicated  |----->| Aggregated        |
+| (Ingested)|       | Typed         |      | Business Metrics  |
+| No schema |       | Cleaned       |      | Star Schemas      |
++-----------+       +---------------+      +-------------------+
+       |                    |                       |
+  Data Lake            Data Warehouse          BI / ML
+  (Storage)            (Processing)          (Consumption)
+```
+
+**Example Use Cases:**
+- Unified analytics platform serving both BI reports and ML pipelines
+- Companies replacing separate data lake + warehouse with a single system
+- Organizations wanting open formats to avoid vendor lock-in
+
+**Popular Tools:** Databricks (Delta Lake), AWS Lake Formation, Snowflake (external tables), Google BigLake
+
+---
+
+### 4.9 Comparison: Data Warehouse vs Data Lake vs Data Mart vs Data Lakehouse
+
+| Feature | Data Warehouse | Data Lake | Data Mart | Data Lakehouse |
+|---------|---------------|-----------|-----------|----------------|
+| **Data Type** | Structured only | All types (raw) | Structured (curated) | All types (structured via table format) |
+| **Schema** | Schema-on-write | Schema-on-read | Schema-on-write | Schema enforcement + evolution |
+| **Processing** | ETL (transform before load) | ELT (load raw, transform later) | ETL from DW or source | ELT with ACID transactions |
+| **Users** | Business analysts, BI teams | Data scientists, ML engineers | Specific department teams | Both BI analysts and data scientists |
+| **Cost** | High (compute + storage) | Low (cheap object storage) | Moderate (subset of DW cost) | Moderate (open formats on cheap storage) |
+| **Query Speed** | Fast (optimized for OLAP) | Slow (raw data, no optimization) | Very fast (small, focused dataset) | Fast (table format optimizations) |
+| **Scope** | Enterprise-wide | Enterprise-wide | Department or business line | Enterprise-wide |
+| **Governance** | Strong | Weak (without tools) | Strong (small scope) | Strong (with Unity Catalog, etc.) |
+| **ACID Support** | Yes | No (without table format) | Yes | Yes |
+| **Best For** | Reporting, dashboards, compliance | ML, exploration, raw data storage | Dept-specific analytics | Unified analytics (BI + ML) |
+
+### When to Use What?
 
 ```
-DATA LAKE                          DATA WAREHOUSE
-+---------------------------+      +---------------------------+
-| Raw Data (all types)      |      | Structured Data (cleaned) |
-| Schema-on-Read            |      | Schema-on-Write           |
-| Low cost per GB           |      | Higher cost per GB        |
-| Flexible exploration      |      | Optimized for analytics   |
-| Minimal transformations   |      | Heavy transformations     |
-+---------------------------+      +---------------------------+
-
-DATA LAKEHOUSE (Modern)
-+---------------------------------------------------+
-| Combines benefits of both:                        |
-| - Raw data storage (like data lake)               |
-│ - ACID transactions (like data warehouse)         │
-│ - Schema enforcement + schema evolution           │
-│ - Cost-effective object storage                   │
-│ - BI and ML workload support                      │
-+---------------------------------------------------+
-Examples: Delta Lake, Apache Iceberg, Apache Hudi
+Do you need raw data storage for ML/exploration?
+  YES --> Data Lake
+  NO  --> Do you need a focused dataset for one team?
+            YES --> Data Mart
+            NO  --> Do you need unified analytics for both BI and ML?
+                      YES --> Data Lakehouse
+                      NO  --> Data Warehouse
 ```
+
+### How They Work Together
+
+In practice, most enterprises use **a combination** of these systems:
+
+```
+Source Systems         Data Lake (Raw)        Data Warehouse        Data Marts
++----------+         +---------------+      +---------------+    +------------+
+| CRM      |-------->|               |      |               |    | Sales Mart |
+| ERP      |-------->|  Bronze Layer |----->|  Gold Layer   |--->| Finance    |
+| Logs     |-------->|  (Raw Data)   |      |  (Curated)    |    | Marketing  |
+| IoT      |-------->|               |      |               |    +------------+
++----------+         +---------------+      +---------------+
+                                    |                               |
+                                    +-----> ML/AI pipelines         +---> BI Tools
+```
+
+**Typical Flow:**
+1. **Ingest** raw data into the **Data Lake** (bronze layer)
+2. **Transform** and clean data into the **Data Warehouse** (silver/gold layers)
+3. **Create Data Marts** from the warehouse for specific departments
+4. **Feed ML pipelines** directly from the lake or warehouse
+5. **Use a Lakehouse** to unify all of the above in a single platform (modern trend)
 
 ---
 
@@ -452,13 +644,13 @@ Cons: Slower ingestion, less flexible        Cons: Data quality issues, slower q
 
 ### 6.3 ACID vs BASE Properties
 
-#### ACID (Traditional Databases)
+#### ACID (Traditional Databases) - ACID prioritizes immediate data consistency over availability
 - **A**tomicity: All or nothing transactions
 - **C**onsistency: Data always in valid state
 - **I**solation: Concurrent transactions don't interfere
 - **D**urability: Committed data survives failures
 
-#### BASE (Distributed/NoSQL Systems)
+#### BASE (Distributed/NoSQL Systems) - BASE prioritizes continuous system availability and performance over immediate consistency
 - **B**asically **A**vailable: System is always available
 - **S**oft state: State may change over time
 - **E**ventual consistency: Will become consistent eventually
@@ -961,7 +1153,7 @@ Structured data follows a fixed schema with predefined columns and types (e.g., 
 ### Q2: When would you choose Parquet over CSV for storing analytical data?
 
 **Answer:** 
-Parquet is superior for analytics because it's columnar (only reads needed columns), compresses 2-10x better than CSV, supports predicate pushdown (filters at storage level), and has built-in schema evolution. CSV is better for data exchange between different systems or when human readability is important. For a data warehouse with billions of rows queried by specific columns, Parquet reduces storage costs by 70% and query times by 10x.
+Parquet is superior for analytics on multiple performance dimensions: **Read Performance** — columnar storage enables column pruning (only reads needed columns) and predicate pushdown (skips row groups that don't match filters), while CSV requires full table scans. **Write Performance** — CSV is faster to write (simple append), but Parquet's write overhead is justified for read-heavy workloads. **Query Efficiency** — Parquet queries are 10-100x faster due to vectorized execution and page-level metadata, while CSV has no indexing or pushdown. **File Size** — Parquet compresses 5-10x better than CSV due to columnar encoding (dictionary, run-length, delta encoding). For a data warehouse with billions of rows queried by specific columns, Parquet reduces storage costs by 70% and query times by 10x. CSV is only preferred for data exchange or when human readability matters.
 
 ### Q3: Explain CAP Theorem and its implications for distributed data systems.
 
@@ -978,6 +1170,32 @@ Schema-on-write enforces structure before storing data (data warehouses) - ensur
 **Answer:** 
 I would design a lakehouse architecture: Ingest via Kafka for real-time needs, land raw data in S3 as Parquet in a bronze layer, process through Spark for cleansing and deduplication into a silver layer, aggregate into business-ready gold layer tables. Use Delta Lake for ACID transactions and schema enforcement. Compute with Spark on EMR/Databricks. Serve via Redshift/BigQuery for BI. Use Airflow for orchestration. Monitor with Great Expectations for data quality and Monte Carlo for observability.
 
+### Q6: What is the difference between a data lake and a data warehouse? When would you use each?
+
+**Answer:** A data warehouse stores **structured, cleaned, and transformed** data optimized for analytical queries (BI, reporting). It uses **schema-on-write** — data must conform to a schema before loading. A data lake stores **raw data in its native format** (structured, semi-structured, unstructured) using **schema-on-read** — structure is applied at query time. Use a **data warehouse** when you need fast, reliable reporting with well-defined business metrics. Use a **data lake** when you need to store diverse raw data for ML, exploratory analysis, or when schemas aren't known upfront. Most modern architectures combine both.
+
+### Q7: What is a data mart, and how does it differ from a data warehouse?
+
+**Answer:** A data mart is a **subset of a data warehouse** focused on a **single department or business function** (e.g., Sales, Finance, Marketing). Key differences:
+- **Scope:** Warehouse is enterprise-wide; data mart is department-specific
+- **Size:** Data marts are smaller, making queries faster and management simpler
+- **Purpose:** Warehouses serve all analytics needs; data marts serve a team's focused needs
+- **Types:** Dependent (sourced from a central DW), Independent (sourced directly from operational systems), or Logical (virtual views over the DW)
+- **Best practice:** Build a centralized enterprise DW first, then create data marts from it (Inmon approach), or build data marts with conformed dimensions and integrate later (Kimball approach).
+
+### Q8: What is a data lakehouse, and why is it becoming popular?
+
+**Answer:** A data lakehouse combines the **flexibility and cost-effectiveness of a data lake** with the **reliability and performance of a data warehouse** in a single platform. It uses **open table formats** (Delta Lake, Apache Iceberg, Apache Hudi) on object storage (S3, GCS) to provide ACID transactions, schema enforcement, and time travel on raw data. It's popular because it eliminates the need for separate systems — one platform serves BI analysts (structured queries) and data scientists (ML on raw data). It also avoids vendor lock-in through open formats.
+
+### Q9: How do data warehouses, data lakes, and data marts work together in an enterprise?
+
+**Answer:** In a typical enterprise architecture:
+1. Raw data is **ingested into a data lake** (bronze layer) from all source systems
+2. Data is **transformed and loaded into a data warehouse** (silver/gold layers) for clean, business-ready analytics
+3. **Data marts are created** from the warehouse (or directly from sources) to serve specific departments
+4. **ML pipelines** consume data directly from the lake or warehouse
+5. Modern trend: use a **data lakehouse** to unify all of these in one platform, reducing complexity and duplication.
+
 ---
 
 ## Summary Checklist
@@ -985,8 +1203,11 @@ I would design a lakehouse architecture: Ingest via Kafka for real-time needs, l
 ### Core Concepts
 - [ ] Understand differences between structured, semi-structured, and unstructured data
 - [ ] Know major data formats and when to use each
+- [ ] Understand format trade-offs: Read/Write Performance, Query Efficiency, and File Size
 - [ ] Understand serialization methods and their trade-offs
 - [ ] Be able to design storage architecture (file vs object vs block)
+- [ ] Understand the differences between Data Warehouse, Data Lake, Data Mart, and Data Lakehouse
+- [ ] Know when to use a data warehouse vs data lake vs data mart
 - [ ] Know data lifecycle management principles
 - [ ] Understand ACID vs BASE and CAP theorem
 - [ ] Can design data mesh vs data fabric architectures
@@ -1004,6 +1225,7 @@ I would design a lakehouse architecture: Ingest via Kafka for real-time needs, l
 
 - [ ] Understand differences between structured, semi-structured, and unstructured data
 - [ ] Know major data formats and when to use each
+- [ ] Understand format trade-offs: Read/Write Performance, Query Efficiency, and File Size
 - [ ] Understand serialization methods and their trade-offs
 - [ ] Be able to design storage architecture (file vs object vs block)
 - [ ] Know data lifecycle management principles
