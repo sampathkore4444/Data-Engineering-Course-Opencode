@@ -150,6 +150,7 @@ A centralized repository for **structured, processed data** optimized for BI and
 A storage repository that holds **raw data in native format** until needed.
 
 **Pros:** Cheap storage, handles all data types, flexible schema-on-read
+
 **Cons:** Data swamp risk, poor BI performance, no ACID transactions
 
 ### Data Lakehouse (Modern)

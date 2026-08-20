@@ -480,6 +480,245 @@ Bronze (Raw)        Silver (Cleaned)       Gold (Business-Ready)
 
 ---
 
+### 4.8a Bronze / Silver / Gold — The Medallion Architecture
+
+The **Medallion Architecture** is a data design pattern that organizes data into **three layers** (or "zones") based on its level of processing and trustworthiness. It is the most common pattern used in modern **Data Lakehouse** implementations.
+
+**Core Idea:** Data flows through three progressive layers — each layer adds more quality, structure, and trust.
+
+```
++---------------------------------------------------------------+
+|                  MEDALLION ARCHITECTURE                       |
++---------------------------------------------------------------+
+|                                                               |
+|   BRONZE              SILVER                 GOLD              |
+|   (Raw)              (Cleaned)           (Business-Ready)     |
+|                                                               |
+|  +----------+       +----------+        +----------+          |
+|  | Raw data |------>| Cleaned |------->| Curated  |          |
+|  | as-is    |       | Validated|       | Business |          |
+|  | from     |       | Deduped  |       | Metrics  |          |
+|  | source   |       | Typed    |       | KPIs     |          |
+|  +----------+       +----------+        +----------+          |
+|                                                               |
+|  Quality:           Quality:            Quality:              |
+|  Low trust          Medium trust        High trust            |
+|  No schema          Enforced schema     Star schema           |
+|  All duplicates     Deduped             Aggregated            |
+|  All formats        Standardized        Business rules        |
+|                                                               |
+|  Users:             Users:              Users:                 |
+|  Data Engineers     Data Engineers      BI Analysts           |
+|  Data Scientists    Data Scientists     Business Users        |
+|                                                               |
+|  Analogy:           Analogy:            Analogy:              |
+|  Mining ore         Smelling/refining   Final product         |
+|  from a mine        the ore             ready to sell         |
++---------------------------------------------------------------+
+```
+
+---
+
+#### Bronze Layer (Raw)
+
+The Bronze layer stores **raw, unprocessed data** exactly as it arrives from source systems. No transformations, no filtering, no quality checks.
+
+**Purpose:**
+- Preserve the original data as an **immutable audit trail**
+- Provide a **reprocessing safety net** — if downstream logic has bugs, you can always reprocess from Bronze
+- Support **multiple downstream consumers** (BI, ML, compliance) from one copy
+- Ingest data **quickly** — don't slow down ingestion for transformations
+
+**Characteristics:**
+- **Append-only** — new data is appended, never updated or deleted
+- **Schema-on-read** — structure is applied only when querying
+- **All data** — including duplicates, errors, and messy formats
+- **Full history** — every row ever ingested is preserved
+- **Lowest cost** — stored in cheap object storage (S3, ADLS)
+
+**Example: Banking Bronze Layer**
+
+```
+Bronze: raw_banking.transactions
++------------------+----------------+----------+---------------------+--------+
+| transaction_id   | account_id     | amount   | transaction_date    | type   |
++------------------+----------------+----------+---------------------+--------+
+| TXN-001          | ACC-1001       | 5000.00  | 2024-01-15 09:30:00 | debit  |
+| TXN-002          | ACC-1002       | 1250.50  | 2024-01-15 10:15:00 | credit |
+| TXN-002          | ACC-1002       | 1250.50  | 2024-01-15 10:15:00 | credit |  <-- duplicate!
+| TXN-003          | ACC-1001       | NULL     | 2024-01-15 11:00:00 | debit  |  <-- NULL amount!
+| TXN-004          | ACC-1003       | -500.00  | 2024/01/16          | refund |  <-- wrong date format!
++------------------+----------------+----------+---------------------+--------+
+
+Note: Duplicates, NULLs, inconsistent formats — ALL kept as-is in Bronze.
+```
+
+---
+
+#### Silver Layer (Cleaned & Validated)
+
+The Silver layer stores **cleaned, deduplicated, and validated** data. Business rules are applied, data types are standardized, and quality checks are enforced.
+
+**Purpose:**
+- Provide a **trusted, clean dataset** for analytics and data science
+- Enforce **data quality rules** (no NULLs in required fields, valid ranges, etc.)
+- **Deduplicate** records (same transaction appearing twice)
+- **Standardize** formats (dates, currencies, text casing)
+- Serve as the **single source of truth** for downstream consumers
+
+**Characteristics:**
+- **Read-write** — data can be updated (SCD Type 1) or versioned (SCD Type 2)
+- **Schema-on-write** — enforced schema with data types
+- **Deduplicated** — duplicate records are removed or flagged
+- **Validated** — data quality rules are applied and logged
+- **Standardized** — consistent formats across all source systems
+
+**Example: Banking Silver Layer**
+
+```
+Silver: silver_banking.transactions (cleaned, deduped, validated)
++------------------+----------------+----------+---------------------+--------+---------------+
+| transaction_id   | account_id     | amount   | transaction_date    | type   | quality_flag  |
++------------------+----------------+----------+---------------------+--------+---------------+
+| TXN-001          | ACC-1001       | 5000.00  | 2024-01-15          | DEBIT  | PASS          |
+| TXN-002          | ACC-1002       | 1250.50  | 2024-01-15          | CREDIT | PASS          |
+| TXN-004          | ACC-1003       | -500.00  | 2024-01-16          | REFUND | PASS          |
++------------------+----------------+----------+---------------------+--------+---------------+
+
+Changes from Bronze:
+- TXN-002 duplicate REMOVED (deduplication)
+- TXN-003 REMOVED (NULL amount failed validation)
+- TXN-004 date FIXED (standardized to YYYY-MM-DD)
+- Types UPPERCASED (standardized)
+- quality_flag ADDED (data quality metadata)
+```
+
+**SQL Logic in Silver Layer:**
+
+```sql
+CREATE OR REPLACE TABLE silver_banking.transactions AS
+SELECT 
+    transaction_id,
+    account_id,
+    CAST(amount AS DECIMAL(18,2)) AS amount,
+    CAST(transaction_date AS DATE) AS transaction_date,
+    UPPER(TRIM(transaction_type)) AS type,
+    CASE 
+        WHEN amount IS NULL THEN 'FAIL_NULL_AMOUNT'
+        WHEN amount < 0 AND transaction_type != 'refund' THEN 'FAIL_NEGATIVE'
+        ELSE 'PASS'
+    END AS quality_flag
+FROM bronze_banking.transactions
+WHERE transaction_id IS NOT NULL
+  AND amount IS NOT NULL                    -- Remove NULLs
+  AND transaction_date IS NOT NULL
+QUALIFY ROW_NUMBER() OVER (                 -- Deduplicate
+    PARTITION BY transaction_id 
+    ORDER BY ingestion_timestamp DESC
+) = 1;
+```
+
+---
+
+#### Gold Layer (Business-Ready)
+
+The Gold layer stores **aggregated, business-ready datasets** organized for specific use cases (BI dashboards, regulatory reports, ML features).
+
+**Purpose:**
+- Provide **pre-aggregated metrics** for fast dashboard loading
+- Organize data into **Star Schema** (fact + dimension tables) for BI tools
+- Apply **business logic** (revenue calculations, risk scores, KPI formulas)
+- Serve **specific use cases** — each Gold table is designed for a particular report or analysis
+
+**Characteristics:**
+- **Business-specific** — each table serves a particular use case
+- **Aggregated** — pre-computed sums, averages, counts, ratios
+- **Star Schema** — fact tables with dimension tables for easy joins
+- **High performance** — optimized for BI queries (columnar, indexed)
+- **Trusted** — only Silver-approved data reaches Gold
+
+**Example: Banking Gold Layer**
+
+```
+Gold: gold_banking.fact_daily_account_balances
++------------+--------------+-------------+----------+----------------+------------------+
+| date_key   | customer_key | account_key | balance  | interest_earned| transaction_count |
++------------+--------------+-------------+----------+----------------+------------------+
+| 20240115   | 1001         | 301         | 50000.00 | 12.33          | 3                 |
+| 20240115   | 1002         | 302         | 12500.50 | 3.08           | 1                 |
+| 20240116   | 1001         | 301         | 52000.00 | 12.82          | 2                 |
++------------+--------------+-------------+----------+----------------+------------------+
+
+Gold: gold_banking.dim_customer (SCD Type 2)
++--------------+------------+----------+--------+------------+-------------+------------+
+| customer_key | customer_id| name     | region | risk_level | effective   | expiry     |
++--------------+------------+----------+--------+------------+-------------+------------+
+| 1001         | CUST-001   | Alice    | North  | Low        | 2019-03-15  | 9999-12-31 |
+| 1002         | CUST-002   | Bob      | South  | Medium     | 2020-07-22  | 9999-12-31 |
+| 1003         | CUST-003   | Charlie  | North  | High       | 2021-01-10  | 2024-06-30 |
+| 1004         | CUST-003   | Charlie  | East   | Low        | 2024-07-01  | 9999-12-31 |  <-- risk changed!
++--------------+------------+----------+--------+------------+-------------+------------+
+```
+
+---
+
+#### Full Flow: Bronze → Silver → Gold (Banking)
+
+```
+Source Systems           BRONZE (Raw)              SILVER (Cleaned)           GOLD (Business-Ready)
++------------------+   +------------------+      +------------------+      +------------------+
+| Core Banking     |-->| raw_transactions |----->| clean_transactions|---->| fact_transactions |
+| (mainframe dump) |   | - all records    |      | - deduped        |      | - daily balances  |
+|                  |   | - duplicates     |      | - typed          |      | - interest earned |
++------------------+   | - NULLs          |      | - validated      |      +------------------+
+| CRM (Salesforce) |-->| raw_customers    |      | - standardized   |      | dim_customer      |
+|                  |   | - mixed formats  |      +------------------+      | (SCD Type 2)      |
++------------------+   +------------------+              |                +------------------+
+| Transaction      |-->                          ETL/ELT                       |
+| Gateway          |                          (Spark/dbt)                      |
++------------------+                                    |                      |
+                                                     v                      v
+                                               +-----------+           +-----------+
+                                               | ML Teams  |           | BI Tools  |
+                                               | (features |           | (reports, |
+                                               |  from     |           |  dash-    |
+                                               |  Silver)  |           |  boards)  |
+                                               +-----------+           +-----------+
+```
+
+#### Data Quality at Each Layer
+
+| Layer | Quality Check | Example |
+|-------|--------------|---------|
+| **Bronze** | None (raw ingestion) | Accept everything as-is |
+| **Silver** | Deduplication, type casting, NULL handling, format standardization | Remove duplicate TXN-002, fix date format, reject NULL amounts |
+| **Gold** | Business rule validation, referential integrity, aggregation correctness | Verify balance = previous balance + transactions, ensure all customer_keys exist in dim_customer |
+
+#### When to Use Which Layer?
+
+```
+What do you need?
+  
+  "I need the raw data forever"           --> Read from BRONZE
+  "I need clean data for analysis"         --> Read from SILVER
+  "I need a dashboard or report"           --> Read from GOLD
+  "I need features for ML training"        --> Read from SILVER (or BRONZE for raw features)
+  "I need to debug a data issue"           --> Check BRONZE (raw) vs SILVER (cleaned) to find where the bug is
+  "A regulator asks for the original data" --> Show BRONZE (immutable audit trail)
+```
+
+#### Popular Tools for Medallion Architecture
+
+| Tool | Layer Support | Key Features |
+|------|---------------|-------------- |
+| **Databricks (Delta Lake)** | All three layers | ACID transactions, time travel, Delta Live Tables |
+| **Apache Iceberg** | All three layers | Schema evolution, hidden partitioning, time travel |
+| **Apache Hudi** | All three layers | Near-real-time upserts, incremental processing |
+| **Snowflake** | All three layers | External tables, Snowpipe, Streams & Tasks |
+| **dbt** | Silver & Gold | SQL-based transformations, testing, documentation |
+
+---
+
 ### 4.9 Comparison: Data Warehouse vs Data Lake vs Data Mart vs Data Lakehouse
 
 | Feature | Data Warehouse | Data Lake | Data Mart | Data Lakehouse |
@@ -529,6 +768,345 @@ Source Systems         Data Lake (Raw)        Data Warehouse        Data Marts
 3. **Create Data Marts** from the warehouse for specific departments
 4. **Feed ML pipelines** directly from the lake or warehouse
 5. **Use a Lakehouse** to unify all of the above in a single platform (modern trend)
+
+---
+
+### 4.10 Fact Tables, Dimension Tables, and Staging
+
+These three concepts are foundational to **data warehouse design** and how data flows from raw sources into usable analytical datasets.
+
+---
+
+#### Staging Area
+
+A **staging area** is a temporary storage zone where raw data lands before being transformed and loaded into the data warehouse. It is the "holding area" in your ETL/ELT pipeline.
+
+**Purpose:**
+- Isolate raw data from the final warehouse (don't pollute the warehouse with messy source data)
+- Perform cleaning, deduplication, type casting, and validation
+- Decouple source systems from the warehouse (if a source changes, only the staging logic breaks, not the whole warehouse)
+- Provide a checkpoint for debugging failed pipelines
+
+**Characteristics:**
+- **Temporary** — data is processed and then discarded or archived
+- **Raw or lightly cleaned** — mirrors source system structure
+- **Not queried by end users** — only used by the ETL pipeline
+- **No business logic** — just technical transformations (cleaning, deduplication)
+
+**Example: Banking Staging Area**
+
+In a modern architecture, the **Data Lake** sits between source systems and the staging area. It acts as the "raw landing zone" — a permanent copy of source data in its original format. The staging SQL then reads **from the lake**, not directly from the source system.
+
+```
+Core Banking System     Data Lake (Raw Zone)        Staging Area              Data Warehouse
++------------------+   +--------------------+      +------------------+      +------------------+
+| transactions     |-->| raw_banking        |----->| stg_transactions |----->| fact_transactions |
+| (messy, mixed    |   | .transactions      |      | (cleaned, typed, |      | (analytics-ready) |
+|  formats, dupes) |   | (Parquet, raw copy,|      |  deduped)        |      |                   |
+|                  |   |  kept forever)     |      +------------------+      +------------------+
++------------------+   +--------------------+
+
+SQL in Staging (reads from the Data Lake, NOT the source system):
+SELECT 
+    CAST(transaction_id AS VARCHAR(50)) AS transaction_id,
+    CAST(account_id AS VARCHAR(20)) AS account_id,
+    CAST(amount AS DECIMAL(18,2)) AS amount,
+    CAST(transaction_date AS DATE) AS transaction_date,
+    UPPER(TRIM(transaction_type)) AS transaction_type
+FROM raw_banking.transactions       -- <-- This table lives in the Data Lake
+WHERE amount IS NOT NULL
+  AND transaction_date >= '2024-01-01';
+```
+
+**Why the Data Lake sits before staging:**
+- **Raw data preservation** — If a bug corrupts your staging SQL, you can reprocess from the lake without hitting the source system again
+- **Decoupling** — The core banking system isn't queried repeatedly. Data is ingested once into the lake, and all downstream pipelines read from the lake
+- **Multiple consumers** — The same raw data feeds staging → warehouse (for BI), data science teams (for ML), and compliance archiving — without re-extracting from the source
+- **Schema-on-read flexibility** — Raw data lands without transformation. Different teams apply different schemas when reading
+
+**Rule of thumb:** If you're writing SQL to clean or validate data, that belongs in staging — not in your final fact or dimension tables.
+
+---
+
+#### Dimension Tables
+
+A **dimension table** describes the **"who, what, where, when"** of your business. It contains descriptive, textual attributes that give context to numerical facts.
+
+**Purpose:**
+- Provide **context** for fact table rows ("this transaction was at Branch X, by Customer Y, on Date Z")
+- Enable **filtering, grouping, and labeling** in reports ("show me sales by Region")
+- Support **Slowly Changing Dimensions (SCDs)** — tracking how attributes change over time
+
+**Characteristics:**
+- **Wide tables** — many descriptive columns (20-100+ columns)
+- **Relatively few rows** — typically thousands to millions (not billions)
+- **Primary key** — unique identifier (often a surrogate key like `dim_customer_id`)
+- **Low cardinality in attributes** — repeated values (e.g., same region appears in many rows)
+
+**Example: Banking Dimension Tables**
+
+```sql
+-- Dim: Customer (WHO)
++-------------------+--------------+----------+--------+------------+-------------+
+| customer_key      | customer_id  | name     | region | risk_level | since_date  |
+| (surrogate key)   | (natural key)|          |        |            |             |
++-------------------+--------------+----------+--------+------------+-------------+
+| 1001              | CUST-001     | Alice    | North  | Low        | 2019-03-15  |
+| 1002              | CUST-002     | Bob      | South  | Medium     | 2020-07-22  |
+| 1003              | CUST-003     | Charlie  | North  | High       | 2021-01-10  |
++-------------------+--------------+----------+--------+------------+-------------+
+
+-- Dim: Branch (WHERE)
++-------------+-----------+----------+---------+
+| branch_key  | branch_id | name     | region  |
++-------------+-----------+----------+---------+
+| 201         | BR-100    | Downtown | North   |
+| 202         | BR-200    | Uptown   | South   |
++-------------+-----------+----------+---------+
+
+-- Dim: Date (WHEN)
++------------+------------+-------+--------+---------+
+| date_key   | full_date  | month | quarter| year    |
++------------+------------+-------+--------+---------+
+| 20240115   | 2024-01-15 | 1     | 1      | 2024    |
+| 20240116   | 2024-01-16 | 1     | 1      | 2024    |
++------------+------------+-------+--------+---------+
+```
+
+**Key insight:** When you want to change a report from "Sales by Region" to "Sales by Risk Level", you're just changing which **dimension** you group by — the fact table stays the same.
+
+---
+
+#### Fact Tables
+
+A **fact table** stores the **numerical measurements and metrics** of a business process. It answers "how much, how many, how often."
+
+**Purpose:**
+- Store **quantitative data** (revenue, count, balance, interest earned)
+- Link to **dimension tables** via foreign keys (to add context)
+- Enable **aggregations** (SUM, AVG, COUNT) across different dimensions
+- Support **drill-down** analysis (from total revenue → by region → by branch)
+
+**Characteristics:**
+- **Narrow but very long** — few columns (keys + measures), but billions of rows
+- **Numerical measures** — the columns you aggregate (SUM, AVG, COUNT)
+- **Foreign keys** — references to dimension tables
+- **Grain** — defines what one row represents (e.g., "one transaction", "one daily balance per account")
+
+**Example: Banking Fact Table**
+
+```sql
+-- Fact: Daily Account Balances
++------------+--------------+-------------+----------+----------------+------------------+
+| date_key   | customer_key | account_key | balance  | interest_earned| transaction_count |
+| (FK→DimDate)| (FK→DimCust) | (FK→DimAcct)| (measure)| (measure)      | (measure)         |
++------------+--------------+-------------+----------+----------------+------------------+
+| 20240115   | 1001         | 301         | 50000.00 | 12.33          | 3                 |
+| 20240115   | 1002         | 302         | 12500.50 | 3.08           | 1                 |
+| 20240115   | 1003         | 303         | 250000.00| 61.64          | 5                 |
+| 20240116   | 1001         | 301         | 52000.00 | 12.82          | 2                 |
++------------+--------------+-------------+----------+----------------+------------------+
+```
+
+**Common fact table types:**
+
+| Type | Grain | Example |
+|------|-------|--------|
+| **Transaction Fact** | One row per event | One row per ATM withdrawal |
+| **Periodic Snapshot** | One row per time period | One row per account per day |
+| **Accumulating Snapshot** | One row per process lifecycle | One row per loan application (track from submission → approval → disbursement) |
+
+---
+
+#### How They Work Together
+
+```
+Source Systems        Data Lake (Raw)         Staging Area              Data Warehouse              BI / OLAP
++----------+        +----------------+      +------------------+      +------------------+      +-----------+
+| Core     |------->| Bronze:        |----->| stg_transactions |----->| dim_customer     |---->|           |
+| Banking  |        | raw_banking    |      | (cleaned, typed, |      | dim_branch       |     | Reports   |
+| CRM      |------->| .transactions  |      |  deduped)        |      | dim_date         |---->| Dashboards|
+| ERP      |        | (Parquet,      |      +------------------+      | fact_transactions|     | OLAP      |
++----------+        |  raw copy,     |              |                +------------------+     | Cubes     |
+                    |  kept forever) |              |                       |                    +-----------+
+                    +----------------+               +---ETL/ELT------------+                         |
+                         |                                                        |                    v
+                    (raw data preserved)                                      +------------------------+
+                                                                             |  ML Pipelines          |
+                                                                             |  Data Science          |
+                                                                             |  Compliance Archives   |
+                                                                             +------------------------+
+```
+
+**The Data Lake is the foundation:** It stores raw data permanently. Staging reads from the lake, cleans the data, and loads it into the warehouse. The same lake data can also feed ML pipelines and compliance archiving — all without re-extracting from source systems.
+
+#### How Raw Data Flows: Source Systems → Data Lake
+
+The arrows in the diagram hide the complexity of **data ingestion**. Here's how raw data actually moves from source systems into the Data Lake:
+
+```
+Source Systems              Ingestion Layer              Data Lake (Bronze)
++------------------+      +---------------------+      +------------------+
+| Core Banking     |----->| Change Data Capture |----->| raw_banking      |
+| (Mainframe/DB)   |      | (Debezium/Oracle    |      | .transactions    |
+|                  |      |  GoldenGate)        |      | (Parquet, S3)    |
++------------------+      +---------------------+      +------------------+
+| CRM (Salesforce) |----->| API Connector       |----->| raw_crm          |
+|                  |      | (Fivetran/Airbyte)  |      | .customers       |
++------------------+      +---------------------+      +------------------+
+| ERP (SAP)        |----->| Batch Extract       |----->| raw_erp          |
+|                  |      | (Airflow + Python)  |      | .orders          |
++------------------+      +---------------------+      +------------------+
+| App Logs (JSON)  |----->| Streaming Ingest    |----->| raw_logs         |
+| (Microservices)  |      | (Kafka → S3 Sink)   |      | .events          |
++------------------+      +---------------------+      +------------------+
+| IoT Sensors      |----->| MQTT → Kafka → S3   |----->| raw_iot          |
+| (MQTT Protocol)  |      | (Kafka Connect)     |      | .readings        |
++------------------+      +---------------------+      +------------------+
+```
+
+#### The 5 Main Ingestion Methods
+
+| Method | How It Works | When to Use | Example Tools |
+|--------|-------------|-------------|---------------|
+| **CDC (Change Data Capture)** | Reads database transaction logs (WAL/binlog) to capture every INSERT, UPDATE, DELETE in real-time | Mainframe/OLTP databases where you need real-time data without impacting source performance | Debezium, Oracle GoldenGate, AWS DMS, Fivetran |
+| **API Extraction** | Calls REST/GraphQL APIs on SaaS systems to pull data periodically | Cloud SaaS apps (Salesforce, HubSpot, Stripe) that expose APIs | Fivetran, Airbyte, Meltano, custom Python scripts |
+| **Batch Extract (Scheduled)** | Runs SQL queries or exports on a schedule (hourly/daily) | Legacy systems, data warehouses, or when real-time isn't needed | Apache Airflow + Python/SQL, dbt, AWS Glue |
+| **Streaming Ingestion** | Producers publish events to a message broker; a sink consumer writes to the lake | High-volume event data (clickstreams, logs, IoT) | Kafka + Kafka Connect (S3 Sink), Kinesis, Pub/Sub |
+| **File Drop (CDC via files)** | Source system exports flat files (CSV/dump) to a shared location; lake ingests them | Legacy mainframes that can't support CDC or APIs | SFTP → Airflow watcher, AWS DataSync |
+
+#### Real-World Banking Ingestion Example
+
+```
++------------------+        Ingestion              Data Lake (Bronze)
+|                  |      +-----------------+      +-------------------+
+| Core Banking     |----->| Debezium CDC    |----->| raw_banking       |
+| (Oracle DB)      |      | (reads WAL log) |      | .transactions     |
+|                  |      | Latency: <1 sec |      | (Parquet, hourly  |
+| 2M txn/day       |      | Zero impact on  |      |  partitions by    |
+|                  |      | source DB       |      |  date)            |
++------------------+      +-----------------+      +-------------------+
+|                  |                               |                   |
+| Salesforce CRM   |-----> Fivetran API   -------->| raw_crm           |
+| (REST API)       |      (runs every 15 min)      | .customers        |
+| 50K records      |      Pulls only changed       | .opportunities    |
+|                  |      records (incremental)     |                   |
++------------------+      +-----------------+      +-------------------+
+|                  |                               |                   |
+| SAP ERP          |-----> Airflow + Python ------>| raw_erp           |
+| (JDBC export)    |      (runs nightly at 2 AM)   | .orders           |
+| Daily batch      |      Full table export →       | .inventory        |
+| extract          |      convert to Parquet        |                   |
++------------------+      +-----------------+      +-------------------+
+|                  |                               |                   |
+| App Logs         |-----> Kafka → S3 Sink -------->| raw_logs          |
+| (JSON events)    |      (real-time streaming)     | .events           |
+| 10K events/sec   |      Writes Parquet files      | (partitioned by   |
+|                  |      every 5 minutes           |  hour)            |
++------------------+      +-----------------+      +-------------------+
+```
+
+#### Key Decision: Streaming vs Batch
+
+```
+Do you need real-time data in the lake?
+  |
+  YES --> Use CDC (Debezium) or Streaming (Kafka → S3)
+  |       Latency: seconds to minutes
+  |       Cost: Higher (always-on infrastructure)
+  |       Best for: Fraud detection, real-time dashboards
+  |
+  NO  --> Do the source systems have APIs?
+            |
+            YES --> Use API Extraction (Fivetran/Airbyte)
+            |       Latency: minutes to hours (scheduled)
+            |       Cost: Moderate (SaaS pricing)
+            |       Best for: CRM, SaaS apps
+            |
+            NO  --> Use Batch Extract (Airflow + SQL)
+                    Latency: hours (nightly batch)
+                    Cost: Low (just compute time)
+                    Best for: Legacy systems, data warehouses
+```
+
+#### What Gets Stored in Bronze?
+
+Each ingestion method writes data to Bronze in a consistent format:
+
+```
+Data Lake (Bronze Zone) - S3/ADLS Structure:
++----------------------------------------------------------+
+| s3://data-lake/bronze/                                    |
+|   raw_banking/                                           |
+|     transactions/                                        |
+|       year=2024/                                         |
+|         month=01/                                        |
+|           day=15/                                        |
+|             hour=09/                                     |
+|               transactions_20240115_090000.parquet       |
+|               transactions_20240115_090500.parquet       |
+|   raw_crm/                                               |
+|     customers/                                           |
+|       incremental/                                       |
+|         2024-01-15.parquet                               |
+|   raw_logs/                                              |
+|     events/                                              |
+|       year=2024/month=01/day=15/hour=09/                 |
+|         events_20240115_090000.parquet                   |
++----------------------------------------------------------+
+
+Key properties of Bronze files:
+- Append-only (new files added, never modified)
+- Partitioned by date/time (for efficient querying)
+- Stored in Parquet format (columnar, compressed)
+- Metadata added: ingestion_timestamp, source_system, batch_id
+```
+
+#### Metadata Added During Ingestion
+
+Every row in Bronze gets two extra columns for traceability:
+
+```sql
+-- Columns added by the ingestion layer
+ingestion_timestamp  TIMESTAMP  -- When the record was ingested into the lake
+source_system        STRING     -- Which source it came from (e.g., 'core_banking', 'crm')
+batch_id             STRING     -- Unique ID for this ingestion run (for debugging)
+```
+
+This way, if something goes wrong, you can trace exactly **when** and **from where** any row in the lake was ingested.
+
+#### SQL Example: Putting It All Together
+
+```sql
+-- Query: Total transactions by region and month
+-- (This is why we have facts + dimensions!)
+SELECT 
+    d.region,                          -- Dimension: WHERE
+    dt.year,                           -- Dimension: WHEN
+    dt.month,                          -- Dimension: WHEN
+    COUNT(*) AS transaction_count,     -- Fact: measure
+    SUM(f.amount) AS total_amount,     -- Fact: measure
+    AVG(f.amount) AS avg_amount        -- Fact: measure
+FROM fact_transactions f               -- Fact table (numbers)
+JOIN dim_customer d                    -- Dimension (context: who/where)
+  ON f.customer_key = d.customer_key
+JOIN dim_date dt                       -- Dimension (context: when)
+  ON f.date_key = dt.date_key
+GROUP BY d.region, dt.year, dt.month
+ORDER BY dt.year, dt.month, d.region;
+```
+
+#### Key Differences at a Glance
+
+| Aspect | Staging | Dimension Table | Fact Table |
+|--------|---------|----------------|------------|
+| **Purpose** | Temporary cleaning area | Descriptive context | Numerical measurements |
+| **Content** | Raw/lightly cleaned data | Text, labels, categories | Numbers, amounts, counts |
+| **Row count** | Varies (source size) | Thousands to millions | Millions to billions |
+| **Column count** | Mirrors source | Many (wide, descriptive) | Few (keys + measures) |
+| **Who uses it** | ETL pipeline only | BI analysts, reports | BI analysts, reports |
+| **Lifespan** | Temporary (deleted after ETL) | Permanent | Permanent |
+| **Example** | `stg_transactions` | `dim_customer`, `dim_date` | `fact_transactions` |
 
 ---
 
@@ -976,14 +1554,14 @@ def validate_customer_data(df):
 ```
 Core Banking Systems              Data Warehouse
 +-----------+                    +--------------------+
-| Deposits  |----ETL---->       | Fact: Daily        |
+| Deposits  |----ETL---->        | Fact: Daily        |
 +-----------+                    | Account Balances   |
 | Loans     |----ETL---->       +--------------------+
 +-----------+                    | Dim: Customer      |
-| Credit    |----ETL---->       | Dim: Product       |
+| Credit    |----ETL---->        | Dim: Product       |
 | Cards     |                    | Dim: Branch        |
 +-----------+                    | Dim: Date          |
-| Wealth    |----ETL---->       | Dim: Currency      |
+| Wealth    |----ETL---->        | Dim: Currency      |
 | Mgmt      |                    +--------------------+
 +-----------+                           |
                                   +-----v------+
@@ -1009,10 +1587,10 @@ Customer Touchpoints           Processing           Unified View
 +------------------+         +------------+      +------------------+
 | Website          |--Kafka->|            |      | Customer 360     |
 | Mobile App       |--Kafka->| Spark      |----->| Profile          |
-| POS (In-Store)   |--CDC-->| Streaming  |      | - Demographics   |
-| Customer Service |--API-->|            |      | - Purchase Hist  |
-| Email/SMS        |--ETL-->|            |      | - Browsing Hist  |
-| Social Media     |--API-->|            |      | - Preferences    |
+| POS (In-Store)   |--CDC--->| Streaming  |      | - Demographics   |
+| Customer Service |--API--->|            |      | - Purchase Hist  |
+| Email/SMS        |--ETL--->|            |      | - Browsing Hist  |
+| Social Media     |--API--->|            |      | - Preferences    |
 +------------------+         +------------+      | - LTV Score      |
                                                  | - Churn Risk     |
                                                  +------------------+
