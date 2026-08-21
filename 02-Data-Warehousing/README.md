@@ -215,6 +215,90 @@ Build **dimensional data marts** for each business process, integrate via confor
 Source -> ETL -> Staging -> Data Marts (Star Schema) -> BI
 ```
 
+#### What is Staging?
+
+**Staging** is a temporary, intermediate storage area where raw data lands after extraction but **before** transformation into the final star schema. It's essentially a "holding zone" between your source systems and the data marts.
+
+| Purpose | Description |
+|---------|-------------|
+| **Decouple extraction from transformation** | Source systems can push data quickly; transformation happens separately |
+| **Data validation** | Check for completeness, duplicates, nulls before loading into marts |
+| **Data cleansing** | Standardize formats, fix encoding issues, handle missing values |
+| **Performance** | Avoid slow, repeated reads from source systems |
+| **Audit trail** | Keep a copy of raw data before it's transformed |
+
+Staging tables mirror the **source system structure** — not the final star schema:
+
+```sql
+-- Staging tables (raw, ugly, temporary)
+stg_orders          -- mirrors ERP orders table
+stg_customers       -- mirrors CRM customers table
+stg_products        -- mirrors inventory system
+```
+
+These are typically **not meant for querying** — they're intermediate. After transformation, the clean data goes into the star schema:
+
+```sql
+-- Final star schema (clean, query-optimized)
+fact_sales
+dim_customer
+dim_product
+dim_date
+```
+
+##### The Full Kimball Flow Visualized
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                        SOURCE SYSTEMS                           │
+│  Oracle ERP    MySQL CRM    API Logs    Flat Files (CSV)       │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ Extract
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      STAGING AREA                               │
+│                                                                 │
+│  stg_orders      ← raw, mirrors source, not queryable          │
+│  stg_customers   ← same structure as source                    │
+│  stg_products    ← temporary, gets truncated each run          │
+│                                                                 │
+│  Purpose: land, validate, clean, deduplicate                   │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ Transform (clean, join, conform)
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     DATA MARTS (Star Schema)                    │
+│                                                                 │
+│     dim_date ───── fact_sales ───── dim_customer                │
+│                         │                                       │
+│                    dim_product                                   │
+│                                                                 │
+│  Clean, denormalized, optimized for BI queries                  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ Load
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  BI / REPORTING                                                 │
+│  Power BI, Tableau, Metabase, dashboards, regulatory reports   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+##### Why Staging Matters in Banking
+
+Imagine you have 5 source systems feeding into a risk data mart:
+
+| Source System | Issues Staging Solves |
+|---------------|----------------------|
+| Core Banking (Oracle) | Dates in different timezone, NULL values in some fields |
+| CRM (MySQL) | Customer names have inconsistent casing |
+| Cards (API JSON) | Nested JSON needs flattening |
+| Payments (Flat file) | Mixed encoding, duplicate rows |
+| Loans (Legacy system) | Outdated status codes need mapping |
+
+Staging catches all of this **before** it contaminates the data mart. The transformation layer cleans it, and the mart stores only clean, conformed data.
+
+> **In short:** Staging = "Clean room" between raw source data and your final star schema. It's where you land, inspect, clean, and prepare data before building the dimensional models that BI tools actually query.
+
 **Pros:** Faster time to value, easier to understand, incremental
 
 **Cons:** Potential redundancy, harder to maintain consistency
