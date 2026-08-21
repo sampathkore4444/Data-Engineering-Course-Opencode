@@ -299,6 +299,258 @@ Source -> Extract -> Load -> Transform -> Target
 | **Presto** | Open Source | Facebook, interactive analytics |
 | **Starburst** | Commercial | Trino-based, enterprise features |
 
+### Data Virtualization – Banking Use Case (Easy to Understand)
+
+> **Think of Data Virtualization as a "universal translator" for your bank's data.**
+
+Imagine a large bank with **5 different systems** that don't talk to each other:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    THE PROBLEM (Without Virtualization)              │
+│                                                                     │
+│   Customer calls the bank: "What is my total relationship?"         │
+│                                                                     │
+│   Bank staff must log into 5 different systems manually:            │
+│                                                                     │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐  ┌───────┐ │
+│   │ Core     │  │ Credit   │  │ Home     │  │ Mutual │  │ Demat │ │
+│   │ Banking  │  │ Cards    │  │ Loan     │  │ Funds  │  │       │ │
+│   │ (Oracle) │  │ (Mainfrm)│  │ (SQL Srv)│  │ (API)  │  │(Excel)│ │
+│   └──────────┘  └──────────┘  └──────────┘  └────────┘  └───────┘ │
+│                                                                     │
+│   Result: 30+ minutes, manual effort, risk of missing data          │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                 THE SOLUTION (With Data Virtualization)             │
+│                                                                     │
+│   Bank staff runs ONE SQL query on the virtual layer:               │
+│                                                                     │
+│   SELECT customer_name,                                            │
+│          savings_balance + credit_card Outstanding + home_loan +    │
+│          mutual_fund_value + demat_value AS total_relationship      │
+│   FROM virtual_customer_360                                         │
+│   WHERE customer_id = 'CUST-12345';                                │
+│                                                                     │
+│            ┌──────────────────────────────────┐                     │
+│            │   DATA VIRTUALIZATION LAYER      │                     │
+│            │   (Denodo / Starburst / Trino)   │                     │
+│            │                                  │                     │
+│            │  • Single SQL interface           │                     │
+│            │  • Real-time queries              │                     │
+│            │  • No data movement               │                     │
+│            │  • Data stays in source systems   │                     │
+│            └───────────────┬──────────────────┘                     │
+│                   ┌────────┼────────┬──────────┬──────────┐        │
+│                   ▼        ▼        ▼          ▼          ▼        │
+│              ┌────────┐┌────────┐┌────────┐┌────────┐┌────────┐   │
+│              │ Core   ││ Credit ││ Home   ││ Mutual ││ Demat  │   │
+│              │ Banking││ Cards  ││ Loan   ││ Funds  ││        │   │
+│              └────────┘└────────┘└────────┘└────────┘└────────┘   │
+│                                                                     │
+│   Result: 5 seconds, no data movement, always fresh data           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Banks Love Data Virtualization
+
+| Banking Challenge | How Virtualization Solves It | Example |
+|-------------------|------------------------------|---------|
+| **Customer 360° View** | Unified view across all products | Single query shows savings, cards, loans, investments |
+| **Regulatory Reports (RBI/SEBI)** | Real-time data without ETL delays | Generate Basel III reports from live data |
+| **Fraud Detection** | Access multiple systems instantly | Correlate card transactions with account activity |
+| **M&A Integration** | Quick data access from acquired bank | Virtualize acquired bank's data without migration |
+| **Legacy System Coexistence** | Work with old + new systems together | Mainframe + Cloud API in one query |
+| **Data Governance** | Centralized access control | Enforce policies across all 5 systems |
+
+### Banking Virtualization Example – Customer 360° Query
+
+```sql
+-- WITHOUT Data Virtualization: 5 separate queries, 5 different logins
+-- Step 1: Login to Core Banking → Run query for account balance
+-- Step 2: Login to Cards System → Run query for card outstanding
+-- Step 3: Login to Loans System → Run query for loan balance
+-- Step 4: Login to Mutual Funds → Call API for fund NAV
+-- Step 5: Login to Demat → Download Excel, calculate total
+-- Total Time: 30+ minutes
+
+-- WITH Data Virtualization: 1 unified query, 5 seconds
+SELECT 
+    c.customer_id,
+    c.customer_name,
+    c.customer_type,
+    
+    -- From Core Banking (Oracle)
+    cb.savings_balance,
+    cb.current_balance,
+    
+    -- From Cards System (Mainframe)
+    cc.card_number,
+    cc.outstanding_amount,
+    cc.available_credit,
+    
+    -- From Loans System (SQL Server)
+    hl.loan_account,
+    hl.principal_outstanding,
+    hl.emi_amount,
+    
+    -- From Mutual Funds (REST API)
+    mf.folio_number,
+    mf.current_value AS mutual_fund_value,
+    
+    -- From Demat (Flat File)
+    df.demat_account,
+    df.holdings_value,
+    
+    -- Computed: Total Relationship Value
+    (cb.savings_balance + cb.current_balance 
+     + cc.outstanding_amount 
+     + hl.principal_outstanding 
+     + mf.current_value 
+     + df.holdings_value) AS total_relationship_value
+    
+FROM virtual_customer_360 c
+LEFT JOIN core_banking cb ON c.customer_id = cb.customer_id
+LEFT JOIN cards_system cc ON c.customer_id = cc.customer_id
+LEFT JOIN loans_system hl ON c.customer_id = hl.customer_id
+LEFT JOIN mutual_funds mf ON c.customer_id = mf.customer_id
+LEFT JOIN demat_holdings df ON c.customer_id = df.customer_id
+WHERE c.customer_id = 'CUST-12345';
+```
+
+### Key Takeaways for Banking
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 DATA VIRTUALIZATION IN BANKING               │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ✅ NO DATA MOVEMENT    → Data stays in source systems      │
+│  ✅ REAL-TIME ACCESS     → Always fresh, no ETL delays       │
+│  ✅ SINGLE SQL QUERY     → One query across 5+ systems       │
+│  ✅ FASTER COMPLIANCE    → RBI/SEBI reports in minutes       │
+│  ✅ COST EFFECTIVE       → No data duplication/storage       │
+│  ✅ LEGACY FRIENDLY      → Works with Mainframe + Cloud      │
+│  ✅ GOVERNANCE           → Centralized access control         │
+│                                                             │
+│  ⚠️  LIMITATIONS:                                           │
+│  • Performance depends on source system speed               │
+│  • Complex transformations still need ETL                   │
+│  • Not ideal for historical data analysis                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Data Virtualization vs Data Warehouse (Banking Context)
+
+> **Common Question:** "Can't we just use a Data Warehouse instead of Data Virtualization?"
+> **Answer:** Yes, you CAN — but they solve different problems. Here's how they compare:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              OPTION 1: DATA WAREHOUSE APPROACH                          │
+│                                                                         │
+│   Source Systems → ETL/ELT → Data Warehouse → Reports                  │
+│                                                                         │
+│   ┌──────────┐    ┌─────┐    ┌─────────────┐    ┌─────────┐           │
+│   │ Core     │───►│     │    │             │───►│ Reports │           │
+│   │ Banking  │    │     │    │  Data       │    │         │           │
+│   ├──────────┤    │ ETL │    │  Warehouse  │    │ Dashb.  │           │
+│   │ Cards    │───►│     │───►│  (Copy of   │───►│         │           │
+│   ├──────────┤    │     │    │   ALL data) │    │ BI Tools│           │
+│   │ Loans    │───►│     │    │             │    │         │           │
+│   ├──────────┤    └─────┘    └─────────────┘    └─────────┘           │
+│   │ Mutual   │───►                                                         │
+│   ├──────────┤                                                            │
+│   │ Demat    │───►                                                        │
+│   └──────────┘                                                            │
+│                                                                         │
+│   ⏱️  Data freshness: Hours to Days (batch ETL)                         │
+│   💾 Storage: DUPLICATE data (5TB source → 5TB warehouse)               │
+│   💰 Cost: HIGH (storage + compute + ETL maintenance)                   │
+│   🔧 Maintenance: HIGH (ETL pipelines break, schema changes)            │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│              OPTION 2: DATA VIRTUALIZATION APPROACH                     │
+│                                                                         │
+│   Source Systems → Virtual Layer → Reports (NO COPY)                    │
+│                                                                         │
+│   ┌──────────┐    ┌───────────┐    ┌─────────┐                         │
+│   │ Core     │◄──►│           │◄──►│ Reports │                         │
+│   │ Banking  │    │  Virtual  │    │         │                         │
+│   ├──────────┤◄──►│  Layer    │◄──►│ Dashb.  │                         │
+│   │ Cards    │    │ (NO COPY) │    │         │                         │
+│   ├──────────┤◄──►│           │◄──►│ BI Tools│                         │
+│   │ Loans    │    └───────────┘    └─────────┘                         │
+│   ├──────────┤                                                            │
+│   │ Mutual   │◄──►                                                        │
+│   ├──────────┤                                                            │
+│   │ Demat    │◄──►                                                        │
+│   └──────────┘                                                            │
+│                                                                         │
+│   ⏱️  Data freshness: REAL-TIME (query goes to source)                  │
+│   💾 Storage: ZERO duplication (data stays in source)                   │
+│   💰 Cost: LOWER (no extra storage, no ETL jobs)                        │
+│   🔧 Maintenance: LOWER (no ETL pipelines to manage)                    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+| Factor | Data Warehouse | Data Virtualization | Winner |
+|--------|---------------|---------------------|--------|
+| **Data Freshness** | Hours/Days (batch) | Real-time | ✅ Virtualization |
+| **Storage Cost** | High (duplicate data) | Zero (no copy) | ✅ Virtualization |
+| **Query Performance** | Fast (pre-processed) | Depends on source speed | ✅ Warehouse |
+| **Complex Analytics** | Excellent (pre-aggregated) | Limited (on-the-fly) | ✅ Warehouse |
+| **Historical Analysis** | Excellent (time travel) | Poor (current data only) | ✅ Warehouse |
+| **ML/AI Workloads** | Excellent (feature store) | Not suitable | ✅ Warehouse |
+| **Setup Time** | Weeks/Months | Days | ✅ Virtualization |
+| **ETL Maintenance** | High (pipelines break) | None | ✅ Virtualization |
+| **Legacy System Support** | Needs ETL connectors | Native connectors | ✅ Virtualization |
+
+### When to Use Which?
+
+| Use Data Warehouse When | Use Data Virtualization When | Use Both Together |
+|------------------------|------------------------------|-------------------|
+| Need historical analysis (trends over years) | Need REAL-TIME data (fraud detection) | Virtualization for real-time ops |
+| Run complex ML/AI models | Have MANY source systems (5+) | Warehouse for historical analytics |
+| Need pre-aggregated dashboards | Want to avoid data duplication | Best of both worlds (Most Banks!) |
+| Data doesn't change every second | Need quick setup (M&A, new regulations) | |
+| Regulatory reports can be daily | Have legacy systems (Mainframe + Cloud) | |
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│           HYBRID APPROACH (What Most Banks Actually Use)        │
+│                                                                 │
+│   ┌──────────┐                                                  │
+│   │ Core     │──┐                                               │
+│   │ Banking  │  │    ┌──────────────┐    ┌──────────────┐      │
+│   ├──────────┤  ├───►│              │    │              │      │
+│   │ Cards    │──┤    │   VIRTUAL    │───►│ Real-time    │      │
+│   ├──────────┤  │    │   LAYER      │    │ Dashboards   │      │
+│   │ Loans    │──┤    │              │    │ Fraud Detect │      │
+│   ├──────────┤  │    └──────┬───────┘    │ Call Center  │      │
+│   │ Mutual   │──┤           │            └──────────────┘      │
+│   ├──────────┤  │           │                                   │
+│   │ Demat    │──┘           │                                   │
+│   └──────────┘              ▼                                   │
+│                      ┌──────────────┐    ┌──────────────┐      │
+│                      │  ETL (Batch) │───►│              │      │
+│                      │  Nightly     │    │  DATA        │      │
+│                      └──────────────┘    │  WAREHOUSE   │      │
+│                                          │              │      │
+│                                          │  Historical  │      │
+│                                          │  Analytics   │      │
+│                                          │  ML/AI       │      │
+│                                          │  Regulatory  │      │
+│                                          └──────────────┘      │
+│                                                                 │
+│   Virtualization → Real-time needs (instant queries)           │
+│   Warehouse      → Analytics needs (historical, ML)            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ### Data Virtualization
 ```
 Query --> Virtual Layer --> Multiple Sources
@@ -417,6 +669,268 @@ User Events        Processing           Personalization
                                  | Profile     |
                                  | (360)       |
                                  +-------------+
+```
+
+---
+
+## 8. Vietnam Banking Data Architecture (Case Study)
+
+### Vietnam Banking Landscape Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                VIETNAM BANKING DIGITAL TRANSFORMATION                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Population: 100M+  |  Banked Population: 69%  |  Mobile Users: 72M+   │
+│                                                                         │
+│  State Bank of Vietnam (SBV) - Central Regulatory Authority             │
+│                                                                         │
+│  Key Trends:                                                            │
+│  • Cashless payment target: 80% by 2025                                 │
+│  • Open Banking framework under development                             │
+│  • Cloud-first policy for new systems (2021+)                           │
+│  • Data localization requirements                                       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Major Vietnamese Banks & Tech Adoption
+
+| Bank | Type | Data Maturity | Likely Architecture | Focus Area |
+|------|------|---------------|---------------------|------------|
+| **Techcombank** | Private | ⭐⭐⭐⭐⭐ | Cloud (Azure/AWS) | Data-driven, advanced analytics |
+| **VIB** | Private | ⭐⭐⭐⭐ | Cloud + On-prem | Digital transformation pioneer |
+| **MB Bank** | Military | ⭐⭐⭐⭐ | Cloud hybrid | Mobile-first banking |
+| **VPBank** | Private | ⭐⭐⭐⭐ | Cloud (AWS) | Fintech partnerships |
+| **Vietcombank** | State | ⭐⭐⭐ | On-prem + Cloud | Government services |
+| **BIDV** | State | ⭐⭐⭐ | On-prem (legacy) | Largest state bank |
+| **VietinBank** | State | ⭐⭐⭐ | On-prem (legacy) | Core modernization |
+| **ACB** | Private | ⭐⭐⭐ | Hybrid | Retail banking |
+| **Sacombank** | Private | ⭐⭐⭐ | On-prem | Payment systems |
+| **HDBank** | Private | ⭐⭐⭐ | Cloud emerging | SME banking |
+
+### Typical Vietnam Banking Data Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│           CURRENT STATE: MOST VIETNAMESE BANKS                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Legacy Systems                    Modern Systems                      │
+│   ┌──────────────┐                  ┌──────────────┐                    │
+│   │ Core Banking │                  │ Digital      │                    │
+│   │ (T24/Flexcube│                  │ Channels     │                    │
+│   │  /Oracle)    │                  │ (Mobile/App) │                    │
+│   └──────┬───────┘                  └──────┬───────┘                    │
+│          │                                 │                            │
+│          │     ┌───────────────────────────┘                            │
+│          │     │                                                        │
+│          ▼     ▼                                                        │
+│   ┌──────────────────┐                                                  │
+│   │   ETL Layer      │                                                  │
+│   │ (Informatica /   │                                                  │
+│   │  Talend / SSIS)  │                                                  │
+│   └────────┬─────────┘                                                  │
+│            │                                                            │
+│            ▼                                                            │
+│   ┌──────────────────┐                                                  │
+│   │ Data Warehouse   │                                                  │
+│   │ (SQL Server /    │                                                  │
+│   │  Oracle On-prem) │                                                  │
+│   └────────┬─────────┘                                                  │
+│            │                                                            │
+│            ▼                                                            │
+│   ┌──────────────────┐                                                  │
+│   │ BI / Reports     │                                                  │
+│   │ (Power BI /      │                                                  │
+│   │  Crystal Reports)│                                                  │
+│   └──────────────────┘                                                  │
+│                                                                         │
+│   ❌ No Data Virtualization                                              │
+│   ❌ No Real-time CDC                                                    │
+│   ❌ Siloed data domains                                                 │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Future State: Recommended Architecture for Vietnamese Banks
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│           FUTURE STATE: MODERN VIETNAMESE BANK DATA ARCHITECTURE        │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   Source Systems                                                        │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                 │
+│   │ Core Banking │  │ Cards/Payments│  │ Digital      │                 │
+│   │ (T24/Flexcube│  │ (Visa/Master)│  │ Channels     │                 │
+│   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                 │
+│          │                 │                  │                          │
+│          └────────┬────────┴──────────────────┘                          │
+│                   │                                                     │
+│              CDC (Debezium)                                             │
+│                   │                                                     │
+│                   ▼                                                     │
+│          ┌──────────────────┐                                           │
+│          │   Apache Kafka   │                                           │
+│          │   (Event Stream) │                                           │
+│          └────────┬─────────┘                                           │
+│                   │                                                     │
+│          ┌────────┴────────────────────────────┐                        │
+│          │                                     │                        │
+│          ▼                                     ▼                        │
+│   ┌──────────────────┐              ┌──────────────────┐                │
+│   │ Data Lake (S3/   │              │ Real-time        │                │
+│   │ Azure Blob)      │              │ Processing       │                │
+│   │ Bronze-Silver-Gold│              │ (Flink/Spark)    │                │
+│   └────────┬─────────┘              └────────┬─────────┘                │
+│            │                                 │                          │
+│            │    ┌────────────────────────────┘                          │
+│            │    │                                                       │
+│            ▼    ▼                                                       │
+│   ┌─────────────────────────────────────────────────────┐              │
+│   │              DATA VIRTUALIZATION LAYER               │              │
+│   │         (Denodo / Starburst / Dremio)                │              │
+│   │                                                      │              │
+│   │  • Customer 360° view                                │              │
+│   │  • Real-time fraud detection                         │              │
+│   │  • Unified regulatory reporting                      │              │
+│   └──────────────────────┬──────────────────────────────┘              │
+│                          │                                             │
+│          ┌───────────────┴───────────────┐                            │
+│          ▼                               ▼                            │
+│   ┌──────────────────┐          ┌──────────────────┐                  │
+│   │ Real-time        │          │ Batch Analytics  │                  │
+│   │ Dashboards       │          │ (ML/AI/Reports)  │                  │
+│   │ • Fraud Alert    │          │ • Basel III/SBV  │                  │
+│   │ • Live Monitor   │          │ • Customer Seg   │                  │
+│   └──────────────────┘          └──────────────────┘                  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Vietnam Banking Use Cases for Data Virtualization
+
+| Use Case | Challenge | Virtualization Solution | Business Value |
+|----------|-----------|------------------------|----------------|
+| **Customer 360°** | Data spread across 5+ core systems | Single query across all systems | Better customer service |
+| **SBV Regulatory Reports** | Manual data extraction from silos | Real-time unified data access | Faster compliance reporting |
+| **Fraud Detection** | Delayed data access across systems | Real-time cross-system correlation | Reduced fraud losses |
+| **AML Monitoring** | Transaction data in multiple systems | Unified transaction view | Better suspicious activity detection |
+| **Open Banking** | Legacy systems don't expose APIs | Virtual layer as API gateway | Enable fintech partnerships |
+| **M&A Integration** | Acquired bank has different systems | Quick data access without migration | Faster integration |
+
+### SBV (State Bank of Vietnam) Compliance Requirements
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│           STATE BANK OF VIETNAM (SBV) DATA REQUIREMENTS                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  📋 Circular 39/2014 (AML/CFT)                                         │
+│     • Customer due diligence data retention: 5 years minimum           │
+│     • Transaction monitoring: Real-time or near-real-time              │
+│     • Suspicious transaction reports (STR) to SBV                      │
+│                                                                         │
+│  📋 Circular 23/2014 (Reporting)                                        │
+│     • Monthly prudential reports to SBV                                 │
+│     • Quarterly financial statements                                    │
+│     • Annual audited reports                                            │
+│                                                                         │
+│  📋 Decision 1168/QD-NHNN (2023 - Digital Transformation)              │
+│     • Cloud adoption encouraged (with data localization)                │
+│     • Open Banking framework development                                │
+│     • Cybersecurity requirements (NIST framework)                       │
+│                                                                         │
+│  📋 Data Localization                                                    │
+│     • Customer data must stay in Vietnam (or approved cloud regions)    │
+│     • Cross-border data transfer requires SBV approval                  │
+│     • Cloud providers: AWS, Azure, GCP have Vietnam regions            │
+│                                                                         │
+│  💡 How Data Virtualization Helps:                                       │
+│     • Centralized access control for SBV audit                          │
+│     • Real-time data for regulatory reporting                           │
+│     • Data lineage for compliance tracking                              │
+│     • No data movement = better security                                │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Vietnam Banking - Implementation Roadmap
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│           3-PHASE IMPLEMENTATION ROADMAP                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  PHASE 1: FOUNDATION (6-12 months)                                      │
+│  ─────────────────────────────────────                                  │
+│  ✅ Inventory all data sources (Core, Cards, Loans, Digital)            │
+│  ✅ Implement CDC from core systems (Debezium)                          │
+│  ✅ Set up Apache Kafka for event streaming                              │
+│  ✅ Build Bronze layer in Data Lake                                      │
+│  ✅ Deploy basic ETL for SBV reports                                     │
+│                                                                         │
+│  PHASE 2: VIRTUALIZATION (6-12 months)                                  │
+│  ─────────────────────────────────────                                  │
+│  ✅ Deploy Data Virtualization tool (Denodo/Starburst)                   │
+│  ✅ Create virtual Customer 360° view                                    │
+│  ✅ Build virtual regulatory data marts                                  │
+│  ✅ Implement real-time fraud detection feeds                            │
+│  ✅ Enable self-service analytics for business users                     │
+│                                                                         │
+│  PHASE 3: ADVANCED (12-18 months)                                       │
+│  ─────────────────────────────────────                                  │
+│  ✅ ML/AI platform integration (Credit scoring, Fraud models)           │
+│  ✅ Open Banking API layer                                              │
+│  ✅ Real-time personalization engine                                     │
+│  ✅ Advanced data governance (Data Mesh optional)                        │
+│  ✅ Multi-cloud strategy (AWS + Azure for resilience)                   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Vietnamese Banks - Technology Stack Comparison
+
+| Component | Current (Typical) | Recommended (Future) |
+|-----------|-------------------|----------------------|
+| **Core Banking** | T24 (Temenos) / Flexcube | Cloud-native core |
+| **Data Warehouse** | SQL Server / Oracle On-prem | Snowflake / Databricks |
+| **ETL** | Informatica / SSIS | dbt + Spark |
+| **CDC** | Manual / Batch | Debezium + Kafka |
+| **Data Virtualization** | ❌ Not used | Denodo / Starburst |
+| **BI Tools** | Crystal Reports / Power BI | Tableau / Looker |
+| **Cloud** | On-premise only | AWS + Azure (hybrid) |
+| **Governance** | Manual policies | Collibra / Alation |
+
+### Key Takeaways for Vietnam Banking
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    KEY INSIGHTS FOR VIETNAMESE BANKS                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1️⃣  DATA VIRTUALIZATION IS NOT YET WIDELY ADOPTED                       │
+│      → Opportunity to be early adopter and gain competitive advantage   │
+│                                                                         │
+│  2️⃣  SBV COMPLIANCE DRIVES DATA ARCHITECTURE                            │
+│      → AML, reporting, and data localization are key requirements        │
+│                                                                         │
+│  3️⃣  LEGACY MODERNIZATION IS PRIORITY #1                                 │
+│      → Most banks are still on T24/Flexcube on-premise                  │
+│                                                                         │
+│  4️⃣  CLOUD ADOPTION IS ACCELERATING                                      │
+│      → AWS, Azure, GCP all have Vietnam regions (HCMC)                 │
+│                                                                         │
+│  5️⃣  OPEN BANKING WILL FORCE DATA INTEGRATION                            │
+│      → Fintech partnerships require unified data access                 │
+│                                                                         │
+│  💡 RECOMMENDATION: Start with Data Virtualization for                  │
+│     real-time SBV reporting and Customer 360° - these are              │
+│     quick wins that demonstrate value without major disruption.         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
