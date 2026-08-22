@@ -1,0 +1,23 @@
+# Source definitions for dbt
+version: 2
+
+sources:
+  - name: staging
+    description: "Staging area - raw data from all sources"
+    database: banking_dw
+    schema: staging
+    tables:
+      - name: stg_customers
+        description: "Staged customer data"
+      - name: stg_accounts
+        description: "Staged account data"
+      - name: stg_transactions
+        description: "Staged transaction data"
+      - name: stg_credit_cards
+        description: "Staged credit card data"
+      - name: stg_card_transactions
+        description: "Staged card transaction data"
+      - name: stg_loans
+        description: "Staged loan data"
+      - name: stg_loan_payments
+        description: "Staged loan payment data"

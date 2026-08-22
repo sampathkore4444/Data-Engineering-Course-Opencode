@@ -1,0 +1,46 @@
+# dbt project configuration
+# Banking Data Warehouse - PostgreSQL
+
+name: 'banking_dw'
+version: '1.0.0'
+config-version: 2
+
+profile: 'banking_dw'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["data"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Model configurations
+models:
+  banking_dw:
+    # Staging models - Views (lightweight, fast refresh)
+    staging:
+      +materialized: view
+      +schema: staging
+    # Intermediate models - Ephemeral (computed on-the-fly)
+    intermediate:
+      +materialized: ephemeral
+    # Mart models - Tables (materialized, query-optimized)
+    marts:
+      +materialized: table
+      +schema: gold
+
+# Seeds configuration
+seeds:
+  banking_dw:
+    +schema: seed_data
+
+# Variables for the project
+vars:
+  start_date: '2020-01-01'
+  end_date: '2025-12-31'
+  currency: 'VND'
+  country: 'Vietnam'

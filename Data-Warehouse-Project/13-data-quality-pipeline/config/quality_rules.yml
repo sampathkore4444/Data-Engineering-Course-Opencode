@@ -1,0 +1,373 @@
+# Data Quality Rules Configuration
+# Banking Data Warehouse
+
+# =====================================================
+# GLOBAL SETTINGS
+# =====================================================
+global:
+  # Database connection
+  database:
+    host: localhost
+    port: 5432
+    name: banking_dw
+    user: dw_admin
+  
+  # Notification settings
+  notifications:
+    slack:
+      enabled: true
+      webhook_url: "${SLACK_WEBHOOK_URL}"
+      channel: "#data-quality-alerts"
+    email:
+      enabled: true
+      recipients:
+        - data-team@bank.com
+        - compliance@bank.com
+  
+  # Schedule
+  schedule:
+    full_scan: "0 6 * * *"      # Daily at 6 AM
+    incremental: "0 */4 * * *"  # Every 4 hours
+    realtime: false              # Enable for critical tables
+
+# =====================================================
+# QUALITY RULES BY TABLE
+# =====================================================
+
+tables:
+  # ---------------------------------------------------
+  # STAGING TABLES
+  # ---------------------------------------------------
+  staging.stg_customers:
+    description: "Customer staging data"
+    owner: "data-engineering"
+    priority: "HIGH"
+    rules:
+      - name: "customer_id_uniqueness"
+        type: "uniqueness"
+        column: "customer_id"
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "customer_id_not_null"
+        type: "completeness"
+        column: "customer_id"
+        threshold: 100  # 100% required
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "email_not_null"
+        type: "completeness"
+        column: "email"
+        threshold: 95  # 95% minimum
+        severity: "HIGH"
+        action: "ALERT"
+      
+      - name: "email_format"
+        type: "pattern"
+        column: "email"
+        pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+        threshold: 98
+        severity: "MEDIUM"
+        action: "ALERT"
+      
+      - name: "customer_type_valid"
+        type: "accepted_values"
+        column: "customer_type"
+        values: ["INDIVIDUAL", "CORPORATE"]
+        threshold: 100
+        severity: "HIGH"
+        action: "BLOCK"
+      
+      - name: "freshness_check"
+        type: "freshness"
+        column: "updated_at"
+        max_age_hours: 24
+        severity: "HIGH"
+        action: "ALERT"
+
+  staging.stg_accounts:
+    description: "Account staging data"
+    owner: "data-engineering"
+    priority: "HIGH"
+    rules:
+      - name: "account_id_uniqueness"
+        type: "uniqueness"
+        column: "account_id"
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "account_id_not_null"
+        type: "completeness"
+        column: "account_id"
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "balance_not_null"
+        type: "completeness"
+        column: "balance"
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "balance_positive"
+        type: "range"
+        column: "balance"
+        min_value: 0
+        max_value: 999999999999
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "account_type_valid"
+        type: "accepted_values"
+        column: "account_type"
+        values: ["SAVINGS", "CURRENT", "TERM_DEPOSIT"]
+        threshold: 100
+        severity: "HIGH"
+        action: "BLOCK"
+      
+      - name: "freshness_check"
+        type: "freshness"
+        column: "updated_at"
+        max_age_hours: 24
+        severity: "HIGH"
+        action: "ALERT"
+
+  staging.stg_transactions:
+    description: "Transaction staging data"
+    owner: "data-engineering"
+    priority: "CRITICAL"
+    rules:
+      - name: "transaction_id_uniqueness"
+        type: "uniqueness"
+        column: "transaction_id"
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "transaction_id_not_null"
+        type: "completeness"
+        column: "transaction_id"
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "amount_not_null"
+        type: "completeness"
+        column: "amount"
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "amount_positive"
+        type: "range"
+        column: "amount"
+        min_value: 0.01
+        max_value: 999999999999
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "transaction_type_valid"
+        type: "accepted_values"
+        column: "transaction_type"
+        values: ["DEBIT", "CREDIT", "TRANSFER"]
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "freshness_check"
+        type: "freshness"
+        column: "created_at"
+        max_age_hours: 1
+        severity: "CRITICAL"
+        action: "ALERT"
+
+  # ---------------------------------------------------
+  # GOLD TABLES
+  # ---------------------------------------------------
+  gold.dim_customer:
+    description: "Customer dimension"
+    owner: "data-analytics"
+    priority: "HIGH"
+    rules:
+      - name: "customer_sk_uniqueness"
+        type: "uniqueness"
+        column: "customer_sk"
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "customer_id_uniqueness"
+        type: "uniqueness"
+        column: "customer_id"
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "customer_name_not_null"
+        type: "completeness"
+        column: "customer_name"
+        threshold: 100
+        severity: "HIGH"
+        action: "BLOCK"
+      
+      - name: "email_not_null"
+        type: "completeness"
+        column: "email"
+        threshold: 95
+        severity: "MEDIUM"
+        action: "ALERT"
+      
+      - name: "customer_segment_valid"
+        type: "accepted_values"
+        column: "customer_segment"
+        values: ["PLATINUM", "GOLD", "SILVER", "STANDARD"]
+        threshold: 100
+        severity: "HIGH"
+        action: "BLOCK"
+      
+      - name: "total_balance_positive"
+        type: "range"
+        column: "total_balance"
+        min_value: 0
+        max_value: 999999999999
+        threshold: 100
+        severity: "HIGH"
+        action: "ALERT"
+      
+      - name: "referential_integrity_accounts"
+        type: "referential"
+        column: "customer_id"
+        reference_table: "staging.stg_accounts"
+        reference_column: "customer_id"
+        threshold: 100
+        severity: "HIGH"
+        action: "ALERT"
+
+  gold.fact_transactions:
+    description: "Transaction facts"
+    owner: "data-analytics"
+    priority: "CRITICAL"
+    rules:
+      - name: "transaction_id_uniqueness"
+        type: "uniqueness"
+        column: "transaction_id"
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "account_sk_not_null"
+        type: "completeness"
+        column: "account_sk"
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "transaction_date_sk_not_null"
+        type: "completeness"
+        column: "transaction_date_sk"
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "amount_positive"
+        type: "range"
+        column: "amount"
+        min_value: 0.01
+        max_value: 999999999999
+        threshold: 100
+        severity: "CRITICAL"
+        action: "BLOCK"
+      
+      - name: "amount_anomaly_detection"
+        type: "statistical"
+        column: "amount"
+        method: "zscore"
+        threshold: 3  # 3 standard deviations
+        severity: "MEDIUM"
+        action: "ALERT"
+      
+      - name: "daily_volume_check"
+        type: "custom_sql"
+        sql: |
+          SELECT 
+            COUNT(*) as daily_count
+          FROM gold.fact_transactions
+          WHERE transaction_date = CURRENT_DATE - 1
+        min_value: 100
+        max_value: 100000
+        severity: "HIGH"
+        action: "ALERT"
+      
+      - name: "freshness_check"
+        type: "freshness"
+        column: "created_at"
+        max_age_hours: 2
+        severity: "CRITICAL"
+        action: "ALERT"
+
+# =====================================================
+# CUSTOM BUSINESS RULES
+# =====================================================
+
+business_rules:
+  - name: "balance_reconciliation"
+    description: "Account balance must match transaction history"
+    sql: |
+      SELECT 
+        a.account_id,
+        a.balance as reported_balance,
+        COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' THEN t.amount ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' THEN t.amount ELSE 0 END), 0) as calculated_balance
+      FROM gold.dim_account a
+      LEFT JOIN gold.fact_transactions t ON a.account_sk = t.account_sk
+      GROUP BY a.account_id, a.balance
+      HAVING ABS(a.balance - (
+        COALESCE(SUM(CASE WHEN t.transaction_type = 'CREDIT' THEN t.amount ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN t.transaction_type = 'DEBIT' THEN t.amount ELSE 0 END), 0)
+      )) > 0.01
+    severity: "CRITICAL"
+    action: "BLOCK"
+    owner: "finance-team"
+
+  - name: "customer_segment_consistency"
+    description: "Customer segment must match balance thresholds"
+    sql: |
+      SELECT 
+        customer_id,
+        customer_segment,
+        total_balance,
+        CASE 
+          WHEN total_balance >= 1000000000 AND customer_segment != 'PLATINUM' THEN 'WRONG_SEGMENT'
+          WHEN total_balance >= 500000000 AND total_balance < 1000000000 AND customer_segment != 'GOLD' THEN 'WRONG_SEGMENT'
+          WHEN total_balance >= 100000000 AND total_balance < 500000000 AND customer_segment != 'SILVER' THEN 'WRONG_SEGMENT'
+          WHEN total_balance < 100000000 AND customer_segment != 'STANDARD' THEN 'WRONG_SEGMENT'
+          ELSE 'OK'
+        END as segment_check
+      FROM gold.dim_customer
+      WHERE segment_check = 'WRONG_SEGMENT'
+    severity: "HIGH"
+    action: "ALERT"
+    owner: "data-analytics"
+
+  - name: "transaction_no_gaps"
+    description: "Check for gaps in transaction sequence"
+    sql: |
+      SELECT 
+        account_id,
+        transaction_date,
+        LAG(transaction_date) OVER (
+          PARTITION BY account_id 
+          ORDER BY transaction_date
+        ) as prev_date,
+        transaction_date - LAG(transaction_date) OVER (
+          PARTITION BY account_id 
+          ORDER BY transaction_date
+        ) as gap_days
+      FROM gold.fact_transactions
+      WHERE transaction_date - LAG(transaction_date) OVER (
+        PARTITION BY account_id 
+        ORDER BY transaction_date
+      ) > 7
+    severity: "MEDIUM"
+    action: "ALERT"
+    owner: "data-engineering"

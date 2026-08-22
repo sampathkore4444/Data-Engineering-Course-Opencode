@@ -1,0 +1,159 @@
+# Data Quality Alert Thresholds
+# Banking Data Warehouse
+
+# =====================================================
+# SEVERITY LEVELS
+# =====================================================
+severity_levels:
+  CRITICAL:
+    description: "Blocks data pipeline, requires immediate action"
+    color: "#FF0000"
+    notification:
+      slack: true
+      email: true
+      pagerduty: true
+    escalation_minutes: 15
+  
+  HIGH:
+    description: "Significant quality issue, action required within 4 hours"
+    color: "#FFA500"
+    notification:
+      slack: true
+      email: true
+      pagerduty: false
+    escalation_minutes: 240
+  
+  MEDIUM:
+    description: "Moderate quality issue, action required within 24 hours"
+    color: "#FFFF00"
+    notification:
+      slack: true
+      email: false
+      pagerduty: false
+    escalation_minutes: 1440
+  
+  LOW:
+    description: "Minor quality issue, action required within 1 week"
+    color: "#00FF00"
+    notification:
+      slack: false
+      email: false
+      pagerduty: false
+    escalation_minutes: 10080
+
+# =====================================================
+# QUALITY SCORE THRESHOLDS
+# =====================================================
+quality_scores:
+  excellent:
+    min_score: 99
+    color: "#00FF00"
+    status: "✅"
+  
+  good:
+    min_score: 95
+    max_score: 99
+    color: "#FFFF00"
+    status: "⚠️"
+  
+  poor:
+    min_score: 90
+    max_score: 95
+    color: "#FFA500"
+    status: "⚠️"
+  
+  critical:
+    max_score: 90
+    color: "#FF0000"
+    status: "❌"
+
+# =====================================================
+# SPECIFIC METRIC THRESHOLDS
+# =====================================================
+metrics:
+  completeness:
+    excellent: 99.5
+    good: 95
+    poor: 90
+    unit: "%"
+  
+  uniqueness:
+    excellent: 100
+    good: 99.9
+    poor: 99
+    unit: "%"
+  
+  freshness:
+    excellent: 1  # hours
+    good: 24
+    poor: 48
+    unit: "hours"
+    comparison: "less_than"  # Lower is better
+  
+  accuracy:
+    excellent: 99.5
+    good: 98
+    poor: 95
+    unit: "%"
+  
+  consistency:
+    excellent: 99.5
+    good: 98
+    poor: 95
+    unit: "%"
+
+# =====================================================
+# ANOMALY DETECTION THRESHOLDS
+# =====================================================
+anomaly_detection:
+  statistical:
+    zscore_threshold: 3  # Standard deviations
+    min_samples: 30
+  
+  volume:
+    # Alert if daily volume changes by more than X%
+    increase_threshold: 50  # 50% increase
+    decrease_threshold: 50  # 50% decrease
+  
+  pattern:
+    # Alert if pattern breaks
+    consecutive_failures: 3  # 3 consecutive failures
+
+# =====================================================
+# NOTIFICATION CHANNELS
+# =====================================================
+notifications:
+  slack:
+    enabled: true
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channel: "#data-quality-alerts"
+    mention_on_critical: "@data-engineering-oncall"
+  
+  email:
+    enabled: true
+    smtp_host: "smtp.bank.com"
+    smtp_port: 587
+    from_address: "dq-alerts@bank.com"
+    recipients:
+      critical:
+        - data-team@bank.com
+        - compliance@bank.com
+        - cto@bank.com
+      high:
+        - data-team@bank.com
+      medium:
+        - data-team@bank.com
+  
+  pagerduty:
+    enabled: false
+    integration_key: "${PAGERDUTY_KEY}"
+    escalation_policy: "data-engineering"
+
+# =====================================================
+# DASHBOARD SETTINGS
+# =====================================================
+dashboard:
+  refresh_interval_minutes: 5
+  retention_days: 90
+  show_historical_trends: true
+  show_anomaly_highlights: true

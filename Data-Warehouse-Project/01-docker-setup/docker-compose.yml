@@ -1,0 +1,89 @@
+##############################################################################
+# Banking Data Warehouse - Docker Compose
+# PostgreSQL + pgAdmin for dimensional modeling and analytics
+##############################################################################
+
+version: '3.8'
+
+services:
+  ############################################################################
+  # PostgreSQL - Data Warehouse (OLAP)
+  ############################################################################
+  postgres-dw:
+    image: postgres:16
+    container_name: postgres-dw
+    hostname: postgres-dw
+    environment:
+      POSTGRES_DB: banking_dw
+      POSTGRES_USER: dw_admin
+      POSTGRES_PASSWORD: Dw@123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-dw-data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - dw-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dw_admin -d banking_dw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ############################################################################
+  # PostgreSQL - Source System (OLTP)
+  ############################################################################
+  postgres-source:
+    image: postgres:16
+    container_name: postgres-source
+    hostname: postgres-source
+    environment:
+      POSTGRES_DB: banking_source
+      POSTGRES_USER: source_admin
+      POSTGRES_PASSWORD: Source@123
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-source-data:/var/lib/postgresql/data
+    networks:
+      - dw-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U source_admin -d banking_source"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ############################################################################
+  # pgAdmin - Database Management UI
+  ############################################################################
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    hostname: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@bank.com
+      PGADMIN_DEFAULT_PASSWORD: Admin@123
+      PGADMIN_LISTEN_PORT: 5050
+    ports:
+      - "5050:5050"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - dw-network
+    depends_on:
+      postgres-dw:
+        condition: service_healthy
+      postgres-source:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-dw-data:
+  postgres-source-data:
+  pgadmin-data:
+
+networks:
+  dw-network:
+    driver: bridge

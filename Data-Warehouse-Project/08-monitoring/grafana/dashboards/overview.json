@@ -1,0 +1,48 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Data Warehouse Overview",
+    "tags": ["banking", "data-warehouse"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Row Counts",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "pg_stat_user_tables.n_tup_ins",
+            "legendFormat": "{{relname}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Data Freshness",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "time() - pg_stat_user_tables.last_autovacuum",
+            "legendFormat": "{{relname}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Query Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "pg_stat_statements.mean_time",
+            "legendFormat": "{{query}}"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "refresh": "5m"
+  }
+}
