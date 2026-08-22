@@ -212,6 +212,262 @@ df_gold.write.format("delta").mode("overwrite").save("/gold/customer_daily")
 | Decentralized data needs | Centralized reporting needs |
 | Long-term strategic investment | Quick implementation needed |
 
+### Data Mesh – Banking Use Case (Easy to Understand)
+
+> **Think of Data Mesh as "each bank department runs its own data kingdom"**
+
+Imagine a large bank with **5 business domains**, each with their own data team:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    THE PROBLEM (Without Data Mesh)                      │
+│                                                                         │
+│   Central Data Team: 50 people managing ALL data for 5 domains          │
+│                                                                         │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐│
+│   │  Retail  │  │ Corporate│  │  Cards & │  │  Wealth  │  │ Risk &   ││
+│   │ Banking  │  │ Banking  │  │ Payments │  │  Mgmt    │  │Compliance││
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘│
+│        │              │              │              │              │      │
+│        └──────────────┴──────────────┼──────────────┴──────────────┘      │
+│                                     │                                   │
+│                              ┌──────▼──────┐                            │
+│                              │   Central   │                            │
+│                              │  Data Team  │                            │
+│                              │  (BOTTLENECK│                            │
+│                              │  3-week     │                            │
+│                              │  wait time) │                            │
+│                              └─────────────┘                            │
+│                                                                         │
+│   ❌ Central team is overwhelmed (500+ data requests/month)             │
+│   ❌ Business teams wait weeks for simple data changes                  │
+│   ❌ Data quality issues go unnoticed (no domain ownership)             │
+│   ❌ Regulatory deadlines missed due to slow response                    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 THE SOLUTION (With Data Mesh)                           │
+│                                                                         │
+│   Each domain OWNS and MANAGES its own data as a product                │
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    SELF-SERVE DATA PLATFORM                      │  │
+│   │   (Shared Storage, Compute, Governance, Discovery Portal)        │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                    │                                    │
+│         ┌──────────────┬───────────┼───────────┬──────────────┐         │
+│         │              │           │           │              │         │
+│   ┌─────▼─────┐ ┌──────▼────┐ ┌───▼────┐ ┌────▼─────┐ ┌─────▼─────┐  │
+│   │  Retail   │ │ Corporate │ │ Cards  │ │  Wealth  │ │   Risk    │  │
+│   │  Domain   │ │  Domain   │ │ Domain │ │  Domain  │ │  Domain   │  │
+│   │           │ │           │ │        │ │          │ │           │  │
+│   │ Team: 8   │ │ Team: 6   │ │Team: 5 │ │ Team: 4  │ │ Team: 6   │  │
+│   │ engineers │ │ engineers │ │enginr  │ │ engineers│ │ engineers │  │
+│   └─────┬─────┘ └──────┬────┘ └───┬────┘ └────┬─────┘ └─────┬─────┘  │
+│         │              │          │           │              │         │
+│         ▼              ▼          ▼           ▼              ▼         │
+│   ┌──────────┐  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+│   │Data      │  │Data      │ │Data      │ │Data      │ │Data      │  │
+│   │Product:  │  │Product:  │ │Product:  │ │Product:  │ │Product:  │  │
+│   │Customer  │  │Loan      │ │Card Txn  │ │Portfolio │ │Risk      │  │
+│   │360°      │  │Book      │ │Stream    │ │Analytics │ │Dashboard │  │
+│   └──────────┘  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+│                                                                         │
+│   ✅ Each domain owns its data (faster, more accurate)                 │
+│   ✅ Self-service portal (business users find data instantly)           │
+│   ✅ Data quality SLAs per product (accountability)                     │
+│   ✅ Federated governance (consistent policies across domains)          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Banks Adopt Data Mesh
+
+| Banking Challenge | Data Mesh Solution | Business Value |
+|-------------------|-------------------|----------------|
+| **Central data team bottleneck** | Domain teams own their data | 5x faster data delivery |
+| **Slow regulatory response** | Risk team manages compliance data | SBV reports on time |
+| **Poor data quality** | Data-as-a-product with SLAs | Trusted analytics |
+| **Siloed customer views** | Cross-domain data products | Better customer service |
+| **M&A integration pain** | New domain plugs into mesh | Faster integration |
+| **Cloud migration complexity** | Self-serve platform | Consistent infrastructure |
+
+### Banking Data Mesh Example – Domain Data Products
+
+```yaml
+# Retail Banking Domain - Customer 360° Data Product
+apiVersion: v1
+kind: DataProduct
+metadata:
+  name: customer-360-retail
+  domain: retail-banking
+  owner: retail-data-team@bank.com
+  tags:
+    - customer
+    - 360-view
+    - retail
+spec:
+  description: "Unified customer view across retail banking products"
+  inputs:
+    - name: core-banking
+      source: oracle://core-db/CUSTOMER_ACCOUNTS
+    - name: deposits
+      source: kafka://deposits-stream
+    - name: fixed-deposits
+      source: s3://retail-raw/fixed-deposits/
+  outputs:
+    - name: customer-360-view
+      schema:
+        - name: customer_id
+          type: STRING
+          description: "Unique customer identifier"
+        - name: customer_name
+          type: STRING
+        - name: total_deposits
+          type: DECIMAL(15,2)
+        - name: total_loans
+          type: DECIMAL(15,2)
+        - name: relationship_value
+          type: DECIMAL(15,2)
+        - name: risk_segment
+          type: STRING
+          description: "HIGH/MEDIUM/LOW based on portfolio"
+  quality:
+    - type: freshness
+      threshold: 1h
+    - type: completeness
+      columns: [customer_id, total_deposits]
+      threshold: 0.99
+    - type: accuracy
+      rule: "relationship_value = total_deposits + total_loans"
+  access:
+    type: role-based
+    roles:
+      - name: relationship-manager
+        permissions: [read]
+      - name: analytics-team
+        permissions: [read]
+      - name: compliance-officer
+        permissions: [read]
+---
+# Risk & Compliance Domain - AML Monitoring Data Product
+apiVersion: v1
+kind: DataProduct
+metadata:
+  name: aml-transaction-monitor
+  domain: risk-compliance
+  owner: risk-data-team@bank.com
+  tags:
+    - aml
+    - compliance
+    - fraud
+    - sbv-regulation
+spec:
+  description: "Real-time AML transaction monitoring for SBV compliance"
+  inputs:
+    - name: card-transactions
+      source: kafka://cards-txn-stream
+    - name: wire-transfers
+      source: kafka://wire-transfer-stream
+    - name: customer-watchlist
+      source: s3://compliance/watchlist/
+  outputs:
+    - name: suspicious-transactions
+      schema:
+        - name: transaction_id
+          type: STRING
+        - name: customer_id
+          type: STRING
+        - name: amount
+          type: DECIMAL(15,2)
+        - name: risk_score
+          type: DECIMAL(5,2)
+        - name: alert_type
+          type: STRING
+          description: "STRUCTURING/VELOCITY/GEOGRAPHY/WATCHLIST"
+        - name: sbv_str_required
+          type: BOOLEAN
+          description: "Whether Suspicious Transaction Report needed"
+  quality:
+    - type: freshness
+      threshold: 5m
+    - type: completeness
+      columns: [transaction_id, risk_score]
+      threshold: 0.999
+  sla:
+    - alert_generation: 30s
+    - sbv_str_filing: 24h
+  access:
+    type: attribute-based
+    attributes:
+      - department: compliance
+      - clearance: conf+
+```
+
+### Data Mesh – Banking Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│           DATA MESH IN A LARGE VIETNAMESE BANK                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    SELF-SERVE DATA PLATFORM                      │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Storage  │  │ Compute  │  │Governance│  │ Discovery│       │  │
+│   │  │ (S3/ADLS)│  │ (Spark)  │  │(DataHub) │  │ Portal   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                    │                                    │
+│   ┌────────────────────────────────┼────────────────────────────────┐   │
+│   │                                │                                │   │
+│   │  ┌─────────────────────────────┼────────────────────────────┐   │   │
+│   │  │                             │                            │   │   │
+│   ▼  ▼                             ▼                            ▼   │   │
+│ ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────┐ │   │
+│ │ RETAIL       │  │ CORPORATE    │  │ CARDS &      │  │ RISK &    │ │   │
+│ │ BANKING      │  │ BANKING      │  │ PAYMENTS     │  │ COMPLIANCE│ │   │
+│ │              │  │              │  │              │  │           │ │   │
+│ │ Data Products│  │ Data Products│  │ Data Products│  │Data Prod  │ │   │
+│ │ • Customer   │  │ • SME Loan   │  │ • Card Txns  │  │• AML Mon  │ │   │
+│ │   360°       │  │   Portfolio  │  │ • Payment    │  │• Risk     │ │   │
+│ │ • Deposit    │  │ • Cash       │  │   Settlement │  │  Score    │ │   │
+│ │   Analytics  │  │   Management │  │ • Merchant   │  │• Reg      │ │   │
+│ │ • Loan       │  │ • Trade      │  │   Analytics  │  │  Reports  │ │   │
+│ │   Performance│  │   Finance    │  │              │  │           │ │   │
+│ └──────────────┘  └──────────────┘  └──────────────┘  └───────────┘ │   │
+│                                                                         │
+│   KEY BENEFIT: Each domain can evolve independently without             │
+│   waiting for a central team. Risk team gets AML data in real-time.    │
+│   Retail team updates Customer 360° without breaking other domains.    │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Takeaways for Data Mesh in Banking
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 DATA MESH IN BANKING – KEY INSIGHTS                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ✅ DOMAIN OWNERSHIP      → Faster, more accurate data delivery         │
+│  ✅ DATA AS A PRODUCT     → SLAs, quality, discoverability              │
+│  ✅ SELF-SERVE PLATFORM   → Business users find data themselves          │
+│  ✅ FEDERATED GOVERNANCE  → Consistent policies, local flexibility      │
+│  ✅ SCALABLE              → Add new domains without central bottleneck  │
+│  ✅ REGULATORY AGILITY    → Risk team responds to SBV changes fast      │
+│                                                                         │
+│  ⚠️  CHALLENGES:                                                        │
+│  • Requires cultural change (teams must think "data as product")        │
+│  • Initial investment in self-serve platform                            │
+│  • Cross-domain queries need careful coordination                       │
+│  • Not suitable for small banks (< 500 employees)                       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 3. Data Fabric
@@ -274,6 +530,225 @@ df_gold.write.format("delta").mode("overwrite").save("/gold/customer_daily")
 | Need automated governance | ✅ Yes | Centralized policy automation |
 | Small, single-cloud | ❌ No | Overkill for simple environments |
 | Domain teams are mature | ⚠️ Consider Data Mesh instead | Data Mesh may be more appropriate |
+
+### Data Fabric – Banking Use Case (Easy to Understand)
+
+> **Think of Data Fabric as an "AI-powered data detective" that automatically finds, catalogs, and connects all your bank's data across every cloud and system.**
+
+Imagine a bank that has **expanded through acquisitions** and now has data scattered everywhere:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    THE PROBLEM (Without Data Fabric)                    │
+│                                                                         │
+│   Bank acquired 3 smaller banks over 10 years. Now data is everywhere:  │
+│                                                                         │
+│   ┌─────────────────────────────────────────────────────────────────┐   │
+│   │  AWS Cloud                    │  Azure Cloud       │ On-Premise │   │
+│   │  ┌─────────────────────┐     │  ┌──────────────┐  │┌─────────┐│   │
+│   │  │ S3 Data Lake        │     │  │ ADLS Gen2    │  ││ Oracle  ││   │
+│   │  │ (Retail Banking)    │     │  │ (Cards Data)  │  ││ Mainframe││   │
+│   │  └─────────────────────┘     │  └──────────────┘  │└─────────┘│   │
+│   │  ┌─────────────────────┐     │  ┌──────────────┐  │           │   │
+│   │  │ Redshift            │     │  │ Synapse      │  │           │   │
+│   │  │ (Analytics)         │     │  │ (Reporting)  │  │           │   │
+│   │  └─────────────────────┘     │  └──────────────┘  │           │   │
+│   └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│   ❌ Data is fragmented across 3 clouds + on-premise                    │
+│   ❌ No one knows what data exists or where it is                       │
+│   ❌ Compliance team can't find all customer data for audits            │
+│   ❌ Duplicate data across environments (same customer, 3 copies)       │
+│   ❌ No automated way to track data lineage across clouds               │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 THE SOLUTION (With Data Fabric)                         │
+│                                                                         │
+│   AI/ML automatically discovers, catalogs, and connects all data        │
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │              METADATA & KNOWLEDGE GRAPH LAYER                    │  │
+│   │                                                                  │  │
+│   │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐  │  │
+│   │  │ Auto       │  │ Smart      │  │ Data       │  │ Policy     │  │  │
+│   │  │ Discovery  │  │ Classifcn  │  │ Lineage    │  │ Automation │  │  │
+│   │  │            │  │ (PII Tags) │  │ (Source→   │  │ (RBAC/     │  │  │
+│   │  │ Scans all  │  │            │  │  Target)   │  │  ABAC)     │  │  │
+│   │  │ clouds     │  │ AI-driven  │  │            │  │            │  │  │
+│   │  └────────────┘  └────────────┘  └────────────┘  └────────────┘  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                    │                                    │
+│         ┌──────────────┬───────────┼───────────┬──────────────┐         │
+│         │              │           │           │              │         │
+│   ┌─────▼─────┐ ┌──────▼────┐ ┌───▼────┐ ┌────▼─────┐ ┌─────▼─────┐     │
+│   │   AWS     │ │  Azure    │ │On-Prem │ │  SaaS    │ │  APIs     │     │
+│   │  Cloud    │ │  Cloud    │ │Systems │ │  Apps    │ │  (Fintech)│     │
+│   └───────────┘ └───────────┘ └────────┘ └──────────┘ └───────────┘     │
+│                                                                         │
+│   ✅ Single view of ALL data across every environment                   │
+│   ✅ AI automatically discovers and classifies sensitive data           │
+│   ✅ Full lineage tracking from source to report                        │
+│   ✅ Automated compliance policies across all clouds                    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Banks Need Data Fabric
+
+| Banking Challenge | Data Fabric Solution | Business Value |
+|-------------------|---------------------|----------------|
+| **Multi-cloud data sprawl** | Unified metadata layer across AWS/Azure/GCP | Single view of all data |
+| **Post-M&A integration** | AI discovers data in acquired bank's systems | Faster integration |
+| **Regulatory audits (SBV/RBI)** | Automated lineage + classification | Audit-ready in days |
+| **Data privacy (GDPR/PDPA)** | Auto-tag PII across all environments | Automated compliance |
+| **Manual data discovery** | AI-powered search + recommendations | 10x faster data access |
+| **Cross-cloud governance** | Centralized policy automation | Consistent security |
+
+### Banking Data Fabric Example – How It Works
+
+```sql
+-- WITHOUT Data Fabric:
+-- Compliance officer needs to find ALL customer PII for SBV audit
+-- Must manually check: AWS S3 + Azure ADLS + Oracle Mainframe + SaaS CRM
+-- Time: 2-3 weeks, high risk of missing data
+
+-- WITH Data Fabric:
+-- AI automatically discovers and catalogs ALL PII across environments
+-- Single query to find ALL customer data:
+
+SELECT 
+    customer_id,
+    customer_name,
+    -- Auto-discovered PII fields (AI tagged these)
+    cnic_number,
+    phone_number,
+    email_address,
+    -- Data location metadata (auto-discovered)
+    source_system,
+    cloud_environment,
+    last_updated,
+    data_classification,  -- AUTO: 'PII-SENSITIVE'
+    lineage_trace          -- AUTO: source → transformations → target
+FROM fabric_metadata.customer_360_unified
+WHERE data_classification LIKE '%PII%'
+  AND customer_id = 'CUST-12345';
+
+-- Result: Complete audit trail in SECONDS, not weeks
+-- AI found data in: AWS S3 (retail), Azure ADLS (cards), Oracle (core)
+```
+
+### Data Fabric – Banking Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│           DATA FABRIC IN A MULTI-CLOUD BANK                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │           AI/ML-POWERED METADATA LAYER                           │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │  Auto    │  │  Smart   │  │  Full    │  │  Policy  │       │  │
+│   │  │Discovery │  │Classifn  │  │ Lineage  │  │Automation│       │  │
+│   │  │ (Scans   │  │ (PII/    │  │(Source→  │  │(RBAC/    │       │  │
+│   │  │  100s of │  │  PHI/    │  │ Trans→   │  │ ABAC/    │       │  │
+│   │  │  tables) │  │  FIN)    │  │ Target)  │  │ Masking) │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                    │                                    │
+│         ┌──────────────┬───────────┼───────────┬──────────────┐         │
+│         │              │           │           │              │         │
+│   ┌─────▼─────┐ ┌──────▼────┐ ┌───▼────┐ ┌────▼─────┐ ┌─────▼─────┐  │
+│   │   AWS     │ │  Azure    │ │On-Prem │ │  SaaS    │ │  APIs     │  │
+│   │ ┌───────┐ │ │ ┌───────┐ │ │┌──────┐│ │ ┌──────┐ │ │ ┌───────┐ │  │
+│   │ │ S3    │ │ │ │ ADLS  │ │ ││Oracle││ │ │Sales │ │ │ │Fintech│ │  │
+│   │ │Lake   │ │ │ │Gen2   │ │ ││Main- ││ │ │Force │ │ │ │Partnr │ │  │
+│   │ │       │ │ │ │       │ │ ││frame ││ │ │  CRM │ │ │ │  APIs │ │  │
+│   │ └───────┘ │ │ └───────┘ │ │└──────┘│ │ └──────┘ │ │ └───────┘ │  │
+│   │ ┌───────┐ │ │ ┌───────┐ │ │        │ │          │ │           │  │
+│   │ │Redshft│ │ │ │Synaps │ │ │        │ │          │ │           │  │
+│   │ └───────┘ │ │ └───────┘ │ │        │ │          │ │           │  │
+│   └───────────┘ └───────────┘ └────────┘ └──────────┘ └───────────┘  │
+│                                                                         │
+│   KEY BENEFIT: AI automatically finds ALL customer data across          │
+│   3 clouds + on-prem. Compliance officer gets audit report in          │
+│   seconds instead of weeks. No manual data hunting needed.             │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Mesh vs Data Fabric – Banking Decision Guide
+
+| Question | Answer | Use |
+|----------|--------|-----|
+| Is your bank in ONE cloud? | No, we have 3+ clouds | **Data Fabric** |
+| Do you have mature domain teams? | Yes, each domain has data engineers | **Data Mesh** |
+| Did you acquire other banks recently? | Yes, data is scattered everywhere | **Data Fabric** |
+| Do you need AI-powered data discovery? | Yes, manual cataloging is too slow | **Data Fabric** |
+| Is your central data team a bottleneck? | Yes, 500+ requests/month | **Data Mesh** |
+| Do you need automated governance? | Yes, regulatory requirements are strict | **Data Fabric** |
+| Do you have 1000+ employees? | Yes | **Data Mesh** |
+| Need both? | Most large banks use **BOTH** together | **Mesh + Fabric** |
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│           HYBRID: DATA MESH + DATA FABRIC (Best of Both)               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   DATA FABRIC provides the AI/ML metadata layer                         │
+│   DATA MESH provides the domain ownership model                         │
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │           AI/ML METADATA LAYER (Data Fabric)                     │  │
+│   │  Auto-discovery │ Classification │ Lineage │ Policy Automation  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                    │                                    │
+│   ┌────────────────────────────────┼────────────────────────────────┐   │
+│   │                    SELF-SERVE PLATFORM (Data Mesh)              │   │
+│   │                    Storage │ Compute │ Governance               │   │
+│   └────────────────────────────────┼────────────────────────────────┘   │
+│                                    │                                    │
+│         ┌──────────────┬───────────┼───────────┬──────────────┐         │
+│         ▼              ▼           ▼           ▼              ▼         │
+│   ┌──────────┐  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+│   │ Retail   │ │ Corporate│ │ Cards &  │ │ Wealth   │ │ Risk &   │  │
+│   │ Domain   │ │ Domain   │ │ Payments │ │ Domain   │ │Compliance│  │
+│   │(Data     │ │(Data     │ │(Data     │ │(Data     │ │(Data     │  │
+│   │ Products)│ │ Products)│ │ Products)│ │ Products)│ │ Products)│  │
+│   └──────────┘  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+│                                                                         │
+│   ✅ AI finds all data automatically (Fabric)                          │
+│   ✅ Domains own their data products (Mesh)                            │
+│   ✅ Automated compliance across all environments (Fabric)             │
+│   ✅ Self-service for business users (Mesh)                            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Takeaways for Data Fabric in Banking
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 DATA FABRIC IN BANKING – KEY INSIGHTS                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ✅ AI-POWERED DISCOVERY    → Finds data across all clouds automatically│
+│  ✅ UNIFIED METADATA        → Single view of ALL data assets            │
+│  ✅ AUTO CLASSIFICATION     → PII/PHI/FIN tagged by AI                 │
+│  ✅ FULL LINEAGE            → Track data from source to report          │
+│  ✅ POLICY AUTOMATION       → RBAC/ABAC enforced across clouds          │
+│  ✅ M&A FRIENDLY            → Quickly discover acquired bank's data     │
+│                                                                         │
+│  ⚠️  CHALLENGES:                                                        │
+│  • Requires significant metadata infrastructure investment              │
+│  • AI accuracy depends on data quality                                  │
+│  • More complex than Data Mesh for small organizations                  │
+│  • May overlap with Data Mesh governance (use both wisely)              │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
