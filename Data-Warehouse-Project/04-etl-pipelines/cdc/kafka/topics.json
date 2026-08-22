@@ -1,0 +1,84 @@
+{
+  "topics": [
+    {
+      "name": "cdc.customers",
+      "partitions": 3,
+      "replication_factor": 1,
+      "retention_ms": 604800000,
+      "cleanup_policy": "delete",
+      "description": "CDC events from core_banking.customers table"
+    },
+    {
+      "name": "cdc.accounts",
+      "partitions": 3,
+      "replication_factor": 1,
+      "retention_ms": 604800000,
+      "cleanup_policy": "delete",
+      "description": "CDC events from core_banking.accounts table"
+    },
+    {
+      "name": "cdc.transactions",
+      "partitions": 6,
+      "replication_factor": 1,
+      "retention_ms": 259200000,
+      "cleanup_policy": "delete",
+      "description": "CDC events from core_banking.transactions table"
+    },
+    {
+      "name": "cdc.cards",
+      "partitions": 3,
+      "replication_factor": 1,
+      "retention_ms": 604800000,
+      "cleanup_policy": "delete",
+      "description": "CDC events from cards_system.cards table"
+    },
+    {
+      "name": "cdc.card_transactions",
+      "partitions": 6,
+      "replication_factor": 1,
+      "retention_ms": 259200000,
+      "cleanup_policy": "delete",
+      "description": "CDC events from cards_system.card_transactions table"
+    },
+    {
+      "name": "cdc.loans",
+      "partitions": 3,
+      "replication_factor": 1,
+      "retention_ms": 604800000,
+      "cleanup_policy": "delete",
+      "description": "CDC events from loans_system.loans table"
+    },
+    {
+      "name": "cdc.loan_payments",
+      "partitions": 3,
+      "replication_factor": 1,
+      "retention_ms": 604800000,
+      "cleanup_policy": "delete",
+      "description": "CDC events from loans_system.loan_payments table"
+    },
+    {
+      "name": "schema-changes.core_banking",
+      "partitions": 1,
+      "replication_factor": 1,
+      "retention_ms": -1,
+      "cleanup_policy": "compact",
+      "description": "Schema changes for core_banking database"
+    },
+    {
+      "name": "schema-changes.cards_system",
+      "partitions": 1,
+      "replication_factor": 1,
+      "retention_ms": -1,
+      "cleanup_policy": "compact",
+      "description": "Schema changes for cards_system database"
+    },
+    {
+      "name": "schema-changes.loans_system",
+      "partitions": 1,
+      "replication_factor": 1,
+      "retention_ms": -1,
+      "cleanup_policy": "compact",
+      "description": "Schema changes for loans_system database"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "name": "cards-system-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "source-cards-system",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "cards_system",
+    "database.server.name": "cards_system",
+    
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_cards_slot",
+    "publication.name": "debezium_cards_publication",
+    
+    "topic.prefix": "cards_system",
+    "schema.include.list": "public",
+    "table.include.list": "public.cards,public.card_transactions",
+    
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.cards_system",
+    
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "cdc.$3",
+    
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "none",
+    
+    "heartbeat.interval.ms": "10000",
+    "tombstones.on.delete": "true",
+    
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
+    
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true",
+    "errors.tolerance": "none"
+  }
+}

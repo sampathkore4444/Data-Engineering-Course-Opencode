@@ -130,8 +130,19 @@ Data-Warehouse-Project/
 │   │   ├── load_facts.py
 │   │   ├── cdc_pipeline.py                # NEW: CDC pipeline
 │   │   └── README.md                      # NEW: DAGs documentation
-│   ├── cdc/                               # NEW: CDC metadata
-│   │   └── metadata/cdc_metadata.sql
+│   ├── cdc/                               # NEW: Complete CDC setup
+│   │   ├── debezium/                      # Debezium connectors
+│   │   │   ├── core-banking-connector.json
+│   │   │   ├── cards-connector.json
+│   │   │   └── loans-connector.json
+│   │   ├── kafka/                         # Kafka configuration
+│   │   │   ├── topics.json
+│   │   │   └── connect-distributed.properties
+│   │   ├── scripts/                       # Setup scripts
+│   │   │   └── setup-debezium.sh
+│   │   ├── metadata/                      # CDC metadata tables
+│   │   │   └── cdc_metadata.sql
+│   │   └── README.md                      # CDC documentation
 │   ├── dbt/                               # dbt transformations
 │   │   ├── dbt_project.yml
 │   │   └── models/
@@ -329,8 +340,12 @@ Data-Warehouse-Project/
 | **pgAdmin** | Database management UI | Latest |
 | **Airflow** | Workflow orchestration | 2.8 |
 | **dbt** | SQL transformations | 1.7 |
+| **Debezium** | CDC (Change Data Capture) | 2.4 |
+| **Kafka** | Event streaming platform | 3.6 |
+| **Kafka Connect** | Debezium connector runtime | 3.6 |
 | **Grafana** | Monitoring dashboards | 10.2 |
 | **Prometheus** | Metrics collection | 2.48 |
+| **Terraform** | Infrastructure as Code | 1.0 |
 
 ---
 
@@ -403,6 +418,8 @@ Tools:          PostgreSQL, Airflow, dbt, Grafana, Terraform
 | **Terraform** | `terraform/` | Infrastructure as Code |
 | **Unit Tests** | `tests/` | ETL logic validation |
 | **CDC Pipeline** | `04-etl-pipelines/cdc/` | Real-time data sync |
+| **Debezium** | `04-etl-pipelines/cdc/debezium/` | PostgreSQL CDC connectors |
+| **Kafka** | `04-etl-pipelines/cdc/kafka/` | Event streaming and topics |
 
 ---
 
