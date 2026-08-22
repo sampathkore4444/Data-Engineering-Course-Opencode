@@ -588,7 +588,7 @@ Imagine a bank that has **expanded through acquisitions** and now has data scatt
 │   │  Cloud    │ │  Cloud    │ │Systems │ │  Apps    │ │  (Fintech)│     │
 │   └───────────┘ └───────────┘ └────────┘ └──────────┘ └───────────┘     │
 │                                                                         │
-│   ✅ Single view of ALL data across every environment                   │
+│   ✅ Single view of ALL data across every environment                  │
 │   ✅ AI automatically discovers and classifies sensitive data           │
 │   ✅ Full lineage tracking from source to report                        │
 │   ✅ Automated compliance policies across all clouds                    │
