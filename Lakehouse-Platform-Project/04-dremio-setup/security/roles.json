@@ -1,0 +1,72 @@
+{
+  "roles": [
+    {
+      "roleName": "data-engineers",
+      "description": "Full access to all layers for data pipeline management",
+      "permissions": [
+        {"type": "SPACE", "path": "banking-raw", "permissions": ["READ", "WRITE", "ALTER"]},
+        {"type": "SPACE", "path": "banking-cleansed", "permissions": ["READ", "WRITE", "ALTER"]},
+        {"type": "SPACE", "path": "banking-gold", "permissions": ["READ", "WRITE", "ALTER"]},
+        {"type": "SOURCE", "path": "minio-s3", "permissions": ["READ", "WRITE"]},
+        {"type": "FUNCTION", "path": "*", "permissions": ["READ", "WRITE"]},
+        {"type": "ADMIN", "permissions": ["MANAGE_REFLECTIONS"]}
+      ]
+    },
+    {
+      "roleName": "data-analysts",
+      "description": "Read-only access to cleansed and gold data",
+      "permissions": [
+        {"type": "SPACE", "path": "banking-raw", "permissions": ["READ"]},
+        {"type": "SPACE", "path": "banking-cleansed", "permissions": ["READ"]},
+        {"type": "SPACE", "path": "banking-gold", "permissions": ["READ"]},
+        {"type": "SOURCE", "path": "minio-s3", "permissions": ["READ"]},
+        {"type": "FUNCTION", "path": "*", "permissions": ["READ"]}
+      ]
+    },
+    {
+      "roleName": "data-scientists",
+      "description": "Read access to cleansed data for ML workloads",
+      "permissions": [
+        {"type": "SPACE", "path": "banking-raw", "permissions": ["READ"]},
+        {"type": "SPACE", "path": "banking-cleansed", "permissions": ["READ"]},
+        {"type": "SPACE", "path": "banking-gold", "permissions": ["READ"]},
+        {"type": "SOURCE", "path": "minio-s3", "permissions": ["READ"]},
+        {"type": "FUNCTION", "path": "*", "permissions": ["READ", "WRITE"]}
+      ]
+    },
+    {
+      "roleName": "risk-team",
+      "description": "Access to credit risk and fraud data",
+      "permissions": [
+        {"type": "SPACE", "path": "banking-cleansed", "permissions": ["READ"]},
+        {"type": "SPACE", "path": "banking-gold", "permissions": ["READ"]},
+        {"type": "SOURCE", "path": "minio-s3", "permissions": ["READ"]}
+      ]
+    },
+    {
+      "roleName": "fraud-team",
+      "description": "Access to fraud alerts and transaction data",
+      "permissions": [
+        {"type": "SPACE", "path": "banking-cleansed", "permissions": ["READ"]},
+        {"type": "SPACE", "path": "banking-gold", "permissions": ["READ"]},
+        {"type": "SOURCE", "path": "minio-s3", "permissions": ["READ"]}
+      ]
+    },
+    {
+      "roleName": "compliance-team",
+      "description": "Access to regulatory reports",
+      "permissions": [
+        {"type": "SPACE", "path": "banking-gold", "permissions": ["READ"]},
+        {"type": "SOURCE", "path": "minio-s3", "permissions": ["READ"]}
+      ]
+    },
+    {
+      "roleName": "executive-team",
+      "description": "Read-only access to dashboards and KPIs",
+      "permissions": [
+        {"type": "SPACE", "path": "banking-gold", "permissions": ["READ"]},
+        {"type": "SOURCE", "path": "minio-s3", "permissions": ["READ"]}
+      ]
+    }
+  ]
+}

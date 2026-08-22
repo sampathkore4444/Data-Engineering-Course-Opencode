@@ -1,0 +1,52 @@
+{
+  "spaceName": "banking-gold",
+  "description": "Business-ready banking data - Gold layer for BI/ML",
+  "entityType": "space",
+  "path": ["banking-gold"],
+  "accessControlList": [
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-analysts"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "risk-team"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "fraud-team"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "compliance-team"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "executive-team"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-engineers"
+      },
+      "permissions": ["READ", "WRITE", "ALTER"]
+    }
+  ],
+  "tag": "gold",
+  "datasetType": "VIRTUAL"
+}

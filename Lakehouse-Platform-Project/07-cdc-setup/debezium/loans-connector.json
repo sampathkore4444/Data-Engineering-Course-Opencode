@@ -1,0 +1,43 @@
+{
+  "name": "loans-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "database.hostname": "sqlserver-loans",
+    "database.port": "1433",
+    "database.user": "${FILE:/opt/kafka/secrets/sqlserver-user}",
+    "database.password": "${FILE:/opt/kafka/secrets/sqlserver-password}",
+    "database.names": "LoansDB",
+    "database.server.name": "loans-system",
+    
+    "topic.prefix": "loans-system",
+    "topic.creation.enable": "true",
+    
+    "table.include.list": "dbo.LOAN_ACCOUNTS,dbo.LOAN_PAYMENTS,dbo.LOAN_APPLICATIONS",
+    
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.loans-system",
+    
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "none",
+    
+    "transforms": "route,unwrap",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "$3",
+    
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.add.fields": "op,table,lsn,source.ts_ms",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
+    
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.loans-system",
+    
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "10000"
+  }
+}

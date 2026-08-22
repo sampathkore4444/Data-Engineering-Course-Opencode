@@ -1,0 +1,87 @@
+# =============================================================================
+# PROMETHEUS CONFIGURATION - Banking Data Platform Monitoring
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # Dremio Metrics
+  - job_name: 'dremio'
+    metrics_path: '/prometheus/metrics'
+    static_configs:
+      - targets: ['dremio-master:9047']
+        labels:
+          service: 'dremio'
+          environment: 'production'
+      - targets: ['dremio-executor-1:9047', 'dremio-executor-2:9047']
+        labels:
+          service: 'dremio'
+          component: 'executor'
+          environment: 'production'
+
+  # Kafka Metrics
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-1:9308', 'kafka-2:9308', 'kafka-3:9308']
+        labels:
+          service: 'kafka'
+          environment: 'production'
+
+  # MinIO Metrics
+  - job_name: 'minio'
+    metrics_path: '/minio/v2/metrics/cluster'
+    static_configs:
+      - targets: ['minio:9000']
+        labels:
+          service: 'minio'
+          environment: 'production'
+
+  # PostgreSQL (Source Systems)
+  - job_name: 'postgresql'
+    static_configs:
+      - targets: ['postgres-core-banking:9187']
+        labels:
+          service: 'postgresql'
+          source: 'core-banking'
+          environment: 'production'
+      - targets: ['postgres-loans:9187']
+        labels:
+          service: 'postgresql'
+          source: 'loans'
+          environment: 'production'
+
+  # Airflow
+  - job_name: 'airflow'
+    static_configs:
+      - targets: ['airflow-webserver:8080']
+        labels:
+          service: 'airflow'
+          environment: 'production'
+
+  # Grafana
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'grafana'
+          environment: 'production'
+
+  # Redis (Caching)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+          environment: 'production'

@@ -1,0 +1,75 @@
+{
+  "securityPolicies": {
+    "version": "1.0.0",
+    "lastUpdated": "2024-01-15",
+    "policies": [
+      {
+        "policyName": "pii-data-classification",
+        "description": "Classify and protect Personally Identifiable Information (PII)",
+        "dataClassification": "CONFIDENTIAL",
+        "applicableColumns": [
+          {"table": "banking-cleansed.core_banking_customers", "columns": ["customer_name", "dob", "pan_number", "email", "phone", "address_line1"]},
+          {"table": "banking-cleansed.credit_cards", "columns": ["card_number", "cvv"]}
+        ],
+        "accessControl": {
+          "allowedRoles": ["data-engineers", "data-analysts", "compliance-team"],
+          "maskingRequired": true,
+          "auditLogging": true
+        }
+      },
+      {
+        "policyName": "financial-data-classification",
+        "description": "Classify and protect financial transaction data",
+        "dataClassification": "RESTRICTED",
+        "applicableColumns": [
+          {"table": "banking-cleansed.core_banking_transactions", "columns": ["amount", "account_id"]},
+          {"table": "banking-cleansed.credit_cards", "columns": ["card_limit", "credit_used"]}
+        ],
+        "accessControl": {
+          "allowedRoles": ["data-engineers", "risk-team", "fraud-team"],
+          "maskingRequired": false,
+          "auditLogging": true
+        }
+      },
+      {
+        "policyName": "regulatory-data-retention",
+        "description": "SBV regulatory data retention requirements",
+        "retentionPeriod": "7 years",
+        "applicableData": ["regulatory-reports", "aml-alerts", "transaction-records"],
+        "archivalPolicy": {
+          "hotStorage": "90 days",
+          "warmStorage": "1 year",
+          "coldStorage": "7 years",
+          "deletionPolicy": "After 7 years, with approval from Compliance Officer"
+        }
+      },
+      {
+        "policyName": "access-review-schedule",
+        "description": "Regular access review for banking data",
+        "frequency": "Quarterly",
+        "reviewers": ["CISO", "Compliance Officer", "Data Governance Lead"],
+        "actions": [
+          "Review all user access permissions",
+          "Remove access for terminated employees",
+          "Update role assignments",
+          "Document any access exceptions"
+        ]
+      },
+      {
+        "policyName": "data-localization",
+        "description": "SBV data localization requirements",
+        "requirements": [
+          "All customer PII must be stored within Vietnam",
+          "Transaction data must be accessible from Vietnamese data centers",
+          "Cross-border data transfer requires SBV approval",
+          "Backup data must be in Vietnamese territory"
+        ],
+        "enforcement": {
+          "storageRegion": "asia-southeast-1",
+          "backupRegion": "asia-southeast-1",
+          "crossBorderApproval": "Required"
+        }
+      }
+    ]
+  }
+}

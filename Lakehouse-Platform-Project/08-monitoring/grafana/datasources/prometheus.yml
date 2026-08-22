@@ -1,0 +1,33 @@
+# =============================================================================
+# GRAFANA DATASOURCE CONFIGURATION
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: '15s'
+      httpMethod: POST
+
+  - name: Dremio
+    type: dremio
+    access: proxy
+    url: http://dremio-master:9047
+    jsonData:
+      authType: 'basic'
+      basicAuthUser: 'admin'
+    secureJsonData:
+      basicAuthPassword: '${DREMIO_PASSWORD}'
+
+  - name: MinIO
+    type: prometheus
+    access: proxy
+    url: http://minio:9000
+    jsonData:
+      timeInterval: '15s'

@@ -1,0 +1,130 @@
+{
+  "ingestion_config": {
+    "version": "1.0.0",
+    "last_updated": "2024-01-15",
+    "source_mappings": {
+      "core-banking": {
+        "source_type": "oracle",
+        "connection": "oracle-core-banking",
+        "tables": [
+          {
+            "source_schema": "CBS",
+            "source_table": "ACCOUNTS",
+            "target_path": "bronze/core-banking/accounts/",
+            "partition_column": null,
+            "primary_key": ["ACCOUNT_ID"],
+            "incremental_column": "LAST_UPDATED",
+            "schedule": "0 */2 * * *",
+            "schema_version": "v1",
+            "expected_columns": [
+              {"name": "ACCOUNT_ID", "type": "VARCHAR(20)"},
+              {"name": "CUSTOMER_ID", "type": "VARCHAR(20)"},
+              {"name": "ACCOUNT_TYPE", "type": "VARCHAR(10)"},
+              {"name": "CURRENCY", "type": "VARCHAR(3)"},
+              {"name": "OPENING_DATE", "type": "DATE"},
+              {"name": "CURRENT_BALANCE", "type": "DECIMAL(18,2)"},
+              {"name": "AVAILABLE_BALANCE", "type": "DECIMAL(18,2)"},
+              {"name": "STATUS", "type": "VARCHAR(10)"},
+              {"name": "BRANCH_CODE", "type": "VARCHAR(10)"},
+              {"name": "LAST_UPDATED", "type": "TIMESTAMP"}
+            ]
+          },
+          {
+            "source_schema": "CBS",
+            "source_table": "TRANSACTIONS",
+            "target_path": "bronze/core-banking/transactions/",
+            "partition_column": "TXN_DATE",
+            "primary_key": ["TXN_ID"],
+            "incremental_column": "TXN_TIMESTAMP",
+            "schedule": "0 */1 * * *",
+            "schema_version": "v1",
+            "expected_columns": [
+              {"name": "TXN_ID", "type": "BIGINT"},
+              {"name": "ACCOUNT_ID", "type": "VARCHAR(20)"},
+              {"name": "TXN_TYPE", "type": "VARCHAR(20)"},
+              {"name": "AMOUNT", "type": "DECIMAL(18,2)"},
+              {"name": "CURRENCY", "type": "VARCHAR(3)"},
+              {"name": "TXN_DATE", "type": "DATE"},
+              {"name": "TXN_TIMESTAMP", "type": "TIMESTAMP"},
+              {"name": "DESCRIPTION", "type": "VARCHAR(200)"},
+              {"name": "REFERENCE", "type": "VARCHAR(50)"},
+              {"name": "CHANNEL", "type": "VARCHAR(20)"},
+              {"name": "STATUS", "type": "VARCHAR(10)"}
+            ]
+          },
+          {
+            "source_schema": "CBS",
+            "source_table": "CUSTOMERS",
+            "target_path": "bronze/core-banking/customers/",
+            "partition_column": null,
+            "primary_key": ["CUSTOMER_ID"],
+            "incremental_column": "LAST_UPDATED",
+            "schedule": "0 */4 * * *",
+            "schema_version": "v1"
+          }
+        ]
+      },
+      "credit-cards": {
+        "source_type": "mainframe",
+        "connection": "mainframe-cards",
+        "tables": [
+          {
+            "source_schema": "CCD",
+            "source_table": "CARDS",
+            "target_path": "bronze/credit-cards/cards/",
+            "partition_column": null,
+            "primary_key": ["CARD_NUMBER"],
+            "incremental_column": "LAST_UPDATED",
+            "schedule": "0 */2 * * *",
+            "schema_version": "v1"
+          },
+          {
+            "source_schema": "CCD",
+            "source_table": "CARD_TRANSACTIONS",
+            "target_path": "bronze/credit-cards/card_transactions/",
+            "partition_column": "TXN_DATE",
+            "primary_key": ["TXN_ID"],
+            "incremental_column": "TXN_TIMESTAMP",
+            "schedule": "0 */1 * * *",
+            "schema_version": "v1"
+          }
+        ]
+      },
+      "loans": {
+        "source_type": "sqlserver",
+        "connection": "sqlserver-loans",
+        "tables": [
+          {
+            "source_schema": "dbo",
+            "source_table": "LOAN_ACCOUNTS",
+            "target_path": "bronze/loans/loan_accounts/",
+            "partition_column": null,
+            "primary_key": ["LOAN_ID"],
+            "incremental_column": "LAST_UPDATED",
+            "schedule": "0 */4 * * *",
+            "schema_version": "v1"
+          },
+          {
+            "source_schema": "dbo",
+            "source_table": "LOAN_PAYMENTS",
+            "target_path": "bronze/loans/loan_payments/",
+            "partition_column": "PAYMENT_DATE",
+            "primary_key": ["PAYMENT_ID"],
+            "incremental_column": "PAYMENT_DATE",
+            "schedule": "0 */1 * * *",
+            "schema_version": "v1"
+          }
+        ]
+      }
+    },
+    "global_settings": {
+      "file_format": "parquet",
+      "compression": "snappy",
+      "max_file_size_mb": 128,
+      "retry_count": 3,
+      "retry_delay_seconds": 60,
+      "quarantine_path": "bronze/_quarantine/",
+      "notification_topic": "arn:aws:sns:us-east-1:123456789:ingestion-alerts"
+    }
+  }
+}

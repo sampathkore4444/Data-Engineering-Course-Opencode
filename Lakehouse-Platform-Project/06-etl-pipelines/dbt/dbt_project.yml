@@ -1,0 +1,115 @@
+# =============================================================================
+# DBT PROJECT CONFIGURATION - Banking Data Transformations
+# =============================================================================
+# Purpose: SQL-based transformations for banking data
+# Tool:    dbt (data build tool)
+# Layer:   Staging → Intermediate → Mart (Bronze → Silver → Gold)
+# =============================================================================
+
+name: 'banking_dwh'
+version: '1.0.0'
+config-version: 2
+
+profile: 'banking'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["data"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# =============================================================================
+# MODEL CONFIGURATION
+# =============================================================================
+models:
+  banking_dwh:
+    # Staging layer (Bronze → Silver)
+    staging:
+      +materialized: view
+      +schema: staging
+      +tags: ['staging', 'bronze-to-silver']
+    
+    # Intermediate layer (Silver processing)
+    intermediate:
+      +materialized: ephemeral
+      +tags: ['intermediate', 'silver']
+    
+    # Mart layer (Silver → Gold)
+    marts:
+      +materialized: view
+      +schema: gold
+      +tags: ['mart', 'gold', 'business-ready']
+
+# =============================================================================
+# SEED CONFIGURATION (for reference data)
+# =============================================================================
+seeds:
+  banking_dwh:
+    +schema: seeds
+    country_codes:
+      +column_types:
+        country_code: varchar(2)
+        country_name: varchar(100)
+    
+    merchant_categories:
+      +column_types:
+        category_code: varchar(10)
+        category_name: varchar(100)
+
+# =============================================================================
+# SNAPSHOT CONFIGURATION (for slowly changing dimensions)
+# =============================================================================
+snapshots:
+  banking_dwh:
+    +target_schema: snapshots
+
+# =============================================================================
+# TEST CONFIGURATION
+# =============================================================================
+tests:
+  +warn_unexpected: true
+  +error_unexpected: false
+
+# =============================================================================
+# VARIABLE CONFIGURATION
+# =============================================================================
+vars:
+  start_date: '2024-01-01'
+  end_date: '2024-12-31'
+  
+  # Data quality thresholds
+  freshness_warn_hours: 24
+  freshness_error_hours: 48
+  
+  # PII columns (for masking)
+  pii_columns:
+    - customer_name
+    - pan_number
+    - email
+    - phone
+    - address_line1
+    - card_number
+
+# =============================================================================
+# QUERY COMMENT CONFIGURATION
+# =============================================================================
+query-comment:
+  comment: 'dbt model: {{ model.name }}'
+  append: true
+
+# =============================================================================
+# ON-Run-Start / On-Run-End hooks
+# =============================================================================
+on-run-start:
+  - "log dbt run started for banking_dwh"
+  - "{{ log('Starting dbt run for banking_dwh', info=True) }}"
+
+on-run-end:
+  - "log dbt run completed for banking_dwh"
+  - "{{ log('Completed dbt run for banking_dwh', info=True) }}"

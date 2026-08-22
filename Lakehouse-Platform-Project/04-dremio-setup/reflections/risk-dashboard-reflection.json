@@ -1,0 +1,66 @@
+{
+  "reflectionName": "risk-dashboard-raw-reflection",
+  "reflectionType": "RAW",
+  "datasetDetails": {
+    "datasetPath": ["banking-gold", "credit_risk_dashboard"],
+    "datasetId": null
+  },
+  "intelligence": {
+    "layout": {
+      "dimensions": [
+        {"name": "customer_id"},
+        {"name": "loan_type"},
+        {"name": "risk_classification"},
+        {"name": "interest_rate_band"}
+      ],
+      "measures": [
+        {"name": "principal_amount"},
+        {"name": "principal_outstanding"},
+        {"name": "emi_amount"},
+        {"name": "total_payments_made"},
+        {"name": "successful_payments"},
+        {"name": "failed_payments"},
+        {"name": "payment_success_rate"}
+      ],
+      "sorts": [
+        {"name": "risk_classification", "direction": "ASC"},
+        {"name": "principal_outstanding", "direction": "DESC"}
+      ]
+    },
+    "approxStats": {
+      "inputRecords": 100000,
+      "outputRecords": 100000,
+      "totalSize": 104857600
+    }
+  },
+  "refresh": {
+    "refreshStrategy": "FULL",
+    "schedule": "0 */4 * * *",  -- Every 4 hours
+    "incrementalRefreshSql": null
+  },
+  "status": {
+    "state": "NEW",
+    "refreshProgress": 100
+  },
+  "automation": {
+    "enabled": true,
+    "accelerationGracePeriodMs": 14400000,  -- 4 hours
+    "favorite": true
+  },
+  "accessControlList": [
+    {
+      "grantee": {
+        "type": "group",
+        "name": "risk-team"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "compliance-team"
+      },
+      "permissions": ["READ"]
+    }
+  ]
+}

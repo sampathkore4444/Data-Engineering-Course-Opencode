@@ -1,0 +1,38 @@
+{
+  "spaceName": "banking-cleansed",
+  "description": "Cleansed and validated banking data - Silver layer",
+  "entityType": "space",
+  "path": ["banking-cleansed"],
+  "accessControlList": [
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-engineers"
+      },
+      "permissions": ["READ", "WRITE", "ALTER"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-analysts"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "risk-team"
+      },
+      "permissions": ["READ"]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "fraud-team"
+      },
+      "permissions": ["READ"]
+    }
+  ],
+  "tag": "cleansed",
+  "datasetType": "VIRTUAL"
+}

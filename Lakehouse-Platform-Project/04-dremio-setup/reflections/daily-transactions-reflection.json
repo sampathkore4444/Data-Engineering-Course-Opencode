@@ -1,0 +1,55 @@
+{
+  "reflectionName": "daily-transactions-agg-reflection",
+  "reflectionType": "AGGREGATE",
+  "datasetDetails": {
+    "datasetPath": ["banking-gold", "daily_transaction_summary"],
+    "datasetId": null
+  },
+  "intelligence": {
+    "layout": {
+      "dimensions": [
+        {"name": "txn_date"},
+        {"name": "channel"},
+        {"name": "txn_type"}
+      ],
+      "measures": [
+        {"name": "transaction_count"},
+        {"name": "total_amount"},
+        {"name": "avg_amount"},
+        {"name": "unique_accounts"},
+        {"name": "high_value_count"}
+      ],
+      "sorts": [
+        {"name": "txn_date", "direction": "DESC"}
+      ]
+    },
+    "approxStats": {
+      "inputRecords": 500000,
+      "outputRecords": 5000,
+      "totalSize": 52428800
+    }
+  },
+  "refresh": {
+    "refreshStrategy": "INCREMENTAL",
+    "schedule": "0 */1 * * *",  -- Every hour
+    "incrementalRefreshSql": "SELECT * FROM daily_transaction_summary WHERE txn_date >= DATEADD(DAY, -1, CURRENT_DATE)"
+  },
+  "status": {
+    "state": "NEW",
+    "refreshProgress": 100
+  },
+  "automation": {
+    "enabled": true,
+    "accelerationGracePeriodMs": 3600000,  -- 1 hour
+    "favorite": true
+  },
+  "accessControlList": [
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-analysts"
+      },
+      "permissions": ["READ"]
+    }
+  ]
+}

@@ -1,0 +1,167 @@
+# =============================================================================
+# SOURCES DEFINITION
+# =============================================================================
+# Purpose: Define source tables for dbt models
+# =============================================================================
+
+version: 2
+
+sources:
+  - name: raw
+    description: "Raw data from source systems (Bronze layer)"
+    database: banking
+    schema: raw
+    loader: Airflow
+    loaded_at_field: _loaded_at
+    freshness:
+      warn_after:
+        count: 24
+        period: hour
+      error_after:
+        count: 48
+        period: hour
+    tables:
+      - name: customers
+        description: "Customer master data from Core Banking"
+        columns:
+          - name: customer_id
+            description: "Unique customer identifier"
+            data_tests:
+              - unique
+              - not_null
+          - name: customer_name
+            description: "Customer full name"
+          - name: dob
+            description: "Date of birth"
+          - name: gender
+            description: "Gender (M/F)"
+          - name: nationality
+            description: "Nationality"
+          - name: pan_number
+            description: "PAN card number (tax ID)"
+          - name: email
+            description: "Email address"
+          - name: phone
+            description: "Phone number"
+          - name: created_date
+            description: "Account creation date"
+          - name: last_updated
+            description: "Last update timestamp"
+
+      - name: accounts
+        description: "Account data from Core Banking"
+        columns:
+          - name: account_id
+            description: "Unique account identifier"
+            data_tests:
+              - unique
+              - not_null
+          - name: customer_id
+            description: "Foreign key to customer"
+            data_tests:
+              - not_null
+          - name: account_type
+            description: "Account type (SAV/CUR/FD/RD)"
+          - name: currency
+            description: "Account currency"
+          - name: opening_date
+            description: "Account opening date"
+          - name: current_balance
+            description: "Current balance"
+          - name: available_balance
+            description: "Available balance"
+          - name: status
+            description: "Account status (ACTIVE/CLOSED/DORMANT)"
+          - name: branch_code
+            description: "Branch code"
+          - name: last_updated
+            description: "Last update timestamp"
+
+      - name: transactions
+        description: "Transaction data from Core Banking"
+        columns:
+          - name: txn_id
+            description: "Unique transaction identifier"
+            data_tests:
+              - unique
+              - not_null
+          - name: account_id
+            description: "Foreign key to account"
+            data_tests:
+              - not_null
+          - name: txn_type
+            description: "Transaction type (CR/DR/TRF)"
+          - name: amount
+            description: "Transaction amount"
+          - name: currency
+            description: "Transaction currency"
+          - name: txn_date
+            description: "Transaction date"
+          - name: txn_timestamp
+            description: "Transaction timestamp"
+          - name: description
+            description: "Transaction description"
+          - name: reference
+            description: "Transaction reference number"
+          - name: channel
+            description: "Transaction channel (ATM/MOBILE/ONLINE/BRANCH)"
+          - name: status
+            description: "Transaction status"
+
+      - name: cards
+        description: "Credit card data from Cards System"
+        columns:
+          - name: card_number
+            description: "Card number"
+            data_tests:
+              - unique
+              - not_null
+          - name: customer_id
+            description: "Foreign key to customer"
+            data_tests:
+              - not_null
+          - name: card_type
+            description: "Card type (VISA/MASTERCARD/AMEX)"
+          - name: card_limit
+            description: "Credit limit"
+          - name: credit_used
+            description: "Credit used"
+          - name: issuance_date
+            description: "Card issuance date"
+          - name: expiry_date
+            description: "Card expiry date"
+          - name: status
+            description: "Card status"
+          - name: last_updated
+            description: "Last update timestamp"
+
+      - name: loans
+        description: "Loan data from Loans System"
+        columns:
+          - name: loan_id
+            description: "Unique loan identifier"
+            data_tests:
+              - unique
+              - not_null
+          - name: customer_id
+            description: "Foreign key to customer"
+            data_tests:
+              - not_null
+          - name: loan_type
+            description: "Loan type (HL/PL/CL/BL/ED/GL)"
+          - name: principal_amount
+            description: "Loan principal amount"
+          - name: principal_outstanding
+            description: "Outstanding principal"
+          - name: interest_rate
+            description: "Interest rate (%)"
+          - name: tenure_months
+            description: "Loan tenure in months"
+          - name: emi_amount
+            description: "Monthly EMI amount"
+          - name: disbursement_date
+            description: "Loan disbursement date"
+          - name: maturity_date
+            description: "Loan maturity date"
+          - name: last_updated
+            description: "Last update timestamp"

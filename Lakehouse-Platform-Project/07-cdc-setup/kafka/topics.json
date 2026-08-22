@@ -1,0 +1,103 @@
+{
+  "topics": [
+    {
+      "name": "accounts",
+      "partitions": 12,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 604800000,
+        "cleanup.policy": "compact,delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Core banking accounts CDC events"
+    },
+    {
+      "name": "customers",
+      "partitions": 6,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 2592000000,
+        "cleanup.policy": "compact,delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Core banking customers CDC events"
+    },
+    {
+      "name": "transactions",
+      "partitions": 24,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 2592000000,
+        "cleanup.policy": "delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Core banking transactions CDC events"
+    },
+    {
+      "name": "cards",
+      "partitions": 6,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 604800000,
+        "cleanup.policy": "compact,delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Credit cards CDC events"
+    },
+    {
+      "name": "card_transactions",
+      "partitions": 24,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 2592000000,
+        "cleanup.policy": "delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Credit card transactions CDC events"
+    },
+    {
+      "name": "loan_accounts",
+      "partitions": 6,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 604800000,
+        "cleanup.policy": "compact,delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Loan accounts CDC events"
+    },
+    {
+      "name": "loan_payments",
+      "partitions": 12,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 2592000000,
+        "cleanup.policy": "delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Loan payments CDC events"
+    },
+    {
+      "name": "fraud-alerts",
+      "partitions": 6,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 604800000,
+        "cleanup.policy": "compact,delete",
+        "min.insync.replicas": 2
+      },
+      "description": "Real-time fraud alerts"
+    },
+    {
+      "name": "aml-alerts",
+      "partitions": 6,
+      "replication_factor": 3,
+      "config": {
+        "retention.ms": 2592000000,
+        "cleanup.policy": "compact,delete",
+        "min.insync.replicas": 2
+      },
+      "description": "AML suspicious activity alerts"
+    }
+  ]
+}

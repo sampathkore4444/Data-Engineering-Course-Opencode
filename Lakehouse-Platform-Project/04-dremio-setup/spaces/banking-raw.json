@@ -1,0 +1,68 @@
+{
+  "spaceName": "banking-raw",
+  "description": "Raw banking data from source systems - Bronze layer",
+  "entityType": "space",
+  "path": ["banking-raw"],
+  "accessControlList": [
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-engineers"
+      },
+      "permissions": [
+        "READ",
+        "WRITE",
+        "ALTER"
+      ]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-analysts"
+      },
+      "permissions": [
+        "READ"
+      ]
+    },
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-scientists"
+      },
+      "permissions": [
+        "READ"
+      ]
+    }
+  ],
+  "tag": "raw",
+  "datasetType": "VIRTUAL",
+  "children": [
+    {
+      "tag": "folder",
+      "name": "core-banking",
+      "children": [
+        {"tag": "file", "name": "accounts", "format": "PARQUET"},
+        {"tag": "file", "name": "transactions", "format": "PARQUET"},
+        {"tag": "file", "name": "customers", "format": "PARQUET"}
+      ]
+    },
+    {
+      "tag": "folder",
+      "name": "credit-cards",
+      "children": [
+        {"tag": "file", "name": "cards", "format": "PARQUET"},
+        {"tag": "file", "name": "card_transactions", "format": "PARQUET"},
+        {"tag": "file", "name": "statements", "format": "PARQUET"}
+      ]
+    },
+    {
+      "tag": "folder",
+      "name": "loans",
+      "children": [
+        {"tag": "file", "name": "loan_accounts", "format": "PARQUET"},
+        {"tag": "file", "name": "loan_payments", "format": "PARQUET"},
+        {"tag": "file", "name": "loan_applications", "format": "PARQUET"}
+      ]
+    }
+  ]
+}

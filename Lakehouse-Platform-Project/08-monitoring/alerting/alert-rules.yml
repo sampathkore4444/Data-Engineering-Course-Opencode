@@ -1,0 +1,160 @@
+# =============================================================================
+# ALERT RULES - Banking Data Platform
+# =============================================================================
+
+groups:
+  - name: dremio_alerts
+    rules:
+      - alert: DremioDown
+        expr: up{job="dremio"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dremio instance down"
+          description: "Dremio instance {{ $labels.instance }} has been down for more than 1 minute."
+
+      - alert: DremioHighQueryLatency
+        expr: dremio_query_latency_seconds > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dremio high query latency"
+          description: "Dremio query latency is {{ $value }}s (threshold: 30s)."
+
+      - alert: DremioReflectionStale
+        expr: dremio_reflection_age_seconds > 7200
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dremio reflection is stale"
+          description: "Reflection {{ $labels.reflection }} is {{ $value }}s old (threshold: 7200s)."
+
+      - alert: DremioLowMemory
+        expr: dremio_memory_usage_bytes / dremio_memory_total_bytes > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dremio low memory"
+          description: "Dremio memory usage is {{ $value | humanizePercentage }}."
+
+  - name: kafka_alerts
+    rules:
+      - alert: KafkaBrokerDown
+        expr: up{job="kafka"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka broker down"
+          description: "Kafka broker {{ $labels.instance }} is down."
+
+      - alert: KafkaConsumerLagHigh
+        expr: kafka_consumer_group_lag > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag high"
+          description: "Consumer group {{ $labels.group }} has lag of {{ $value }}."
+
+      - alert: KafkaPartitionCountHigh
+        expr: kafka_topic_partitions > 24
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Kafka partition count high"
+          description: "Topic {{ $labels.topic }} has {{ $value }} partitions."
+
+  - name: postgresql_alerts
+    rules:
+      - alert: PostgreSQLDown
+        expr: up{job="postgresql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL instance down"
+          description: "PostgreSQL instance {{ $labels.instance }} is down."
+
+      - alert: PostgreSQLHighConnections
+        expr: pg_stat_activity_count > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL high connections"
+          description: "PostgreSQL has {{ $value }} active connections (threshold: 100)."
+
+      - alert: PostgreSQLSlowQueries
+        expr: pg_stat_activity_max_tx_duration > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL slow queries"
+          description: "PostgreSQL has queries running for {{ $value }}s."
+
+  - name: minio_alerts
+    rules:
+      - alert: MinIODown
+        expr: up{job="minio"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MinIO instance down"
+          description: "MinIO instance {{ $labels.instance }} is down."
+
+      - alert: MinIOLowDiskSpace
+        expr: minio_cluster_disk_free_bytes / minio_cluster_disk_total_bytes < 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MinIO low disk space"
+          description: "MinIO disk usage is {{ $value | humanizePercentage }}."
+
+  - name: airflow_alerts
+    rules:
+      - alert: AirflowDAGRunFailed
+        expr: airflow_dag_run_failed > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Airflow DAG run failed"
+          description: "DAG {{ $labels.dag }} has {{ $value }} failed runs."
+
+      - alert: AirflowTaskFailed
+        expr: airflow_task_failed > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Airflow task failed"
+          description: "Task {{ $labels.task }} in DAG {{ $labels.dag }} has failed."
+
+  - name: data_quality_alerts
+    rules:
+      - alert: DataFreshnessStale
+        expr: data_freshness_seconds > 86400
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data freshness stale"
+          description: "Table {{ $labels.table }} data is {{ $value }}s old."
+
+      - alert: DataQualityLow
+        expr: data_quality_score < 0.95
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Data quality low"
+          description: "Table {{ $labels.table }} quality score is {{ $value }}."

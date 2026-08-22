@@ -1,0 +1,36 @@
+{
+  "name": "minio-s3",
+  "description": "MinIO S3-compatible storage for data lake",
+  "type": "S3",
+  "config": {
+    "credentialType": "ACCESS_KEY",
+    "accessKey": "${MINIO_ACCESS_KEY}",
+    "secretKey": "${MINIO_SECRET_KEY}",
+    "endpoint": "http://minio:9000",
+    "region": "us-east-1",
+    "pathStyleAccess": true,
+    "enableAccelerate": false,
+    "encryption": {
+      "type": "SSE_S3"
+    },
+    "Account-mode": "SINGLE",
+    "status": "VALID",
+    "datasets": [
+      {
+        "datasetName": "banking-lake",
+        "config": {
+          "path": "banking-lake"
+        }
+      }
+    ]
+  },
+  "accessControlList": [
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-engineers"
+      },
+      "permissions": ["READ", "WRITE"]
+    }
+  ]
+}

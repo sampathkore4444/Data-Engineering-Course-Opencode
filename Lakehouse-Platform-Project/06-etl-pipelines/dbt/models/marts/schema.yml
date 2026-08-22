@@ -1,0 +1,86 @@
+# =============================================================================
+# SCHEMA FILE: Mart Models
+# =============================================================================
+# Purpose: Define schema and tests for mart (Gold) models
+# =============================================================================
+
+version: 2
+
+models:
+  - name: mart_customer_360
+    description: "Complete customer view across all banking products"
+    columns:
+      - name: customer_id
+        description: "Unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_name
+        description: "Customer full name"
+        tests:
+          - not_null
+      - name: total_balance
+        description: "Total balance across all accounts"
+        tests:
+          - not_null
+      - name: total_card_outstanding
+        description: "Total credit card outstanding"
+        tests:
+          - not_null
+      - name: total_loan_outstanding
+        description: "Total loan outstanding"
+        tests:
+          - not_null
+      - name: net_relationship_value
+        description: "Net relationship value (Assets - Liabilities)"
+        tests:
+          - not_null
+      - name: customer_segment
+        description: "Customer segment based on relationship value"
+        tests:
+          - accepted_values:
+              values: ['PLATINUM', 'GOLD', 'SILVER', 'STANDARD']
+
+  - name: mart_daily_transactions
+    description: "Daily aggregated transaction metrics"
+    columns:
+      - name: txn_date
+        description: "Transaction date"
+        tests:
+          - not_null
+      - name: channel
+        description: "Transaction channel"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ATM', 'MOBILE', 'ONLINE', 'BRANCH', 'UPI', 'BANK_TRANSFER', 'OTHER']
+      - name: txn_type
+        description: "Transaction type"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['CREDIT', 'DEBIT', 'TRANSFER', 'OTHER']
+      - name: transaction_count
+        description: "Number of transactions"
+        tests:
+          - not_null
+
+  - name: mart_credit_risk
+    description: "Credit risk analysis for risk management"
+    columns:
+      - name: loan_type
+        description: "Loan type"
+        tests:
+          - not_null
+      - name: total_loans
+        description: "Total number of loans"
+        tests:
+          - not_null
+      - name: total_outstanding
+        description: "Total outstanding amount"
+        tests:
+          - not_null
+      - name: npa_ratio
+        description: "Non-performing asset ratio"
+        tests:
+          - not_null

@@ -1,0 +1,47 @@
+{
+  "name": "core-banking-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.oracle.OracleConnector",
+    "database.hostname": "oracle-core-banking",
+    "database.port": "1521",
+    "database.user": "debezium",
+    "database.password": "${FILE:/opt/kafka/secrets/oracle-password}",
+    "database.dbname": "COREBANK",
+    "database.server.name": "core-banking",
+    "database.pdb.name": "COREPDB",
+    
+    "topic.prefix": "core-banking",
+    "topic.creation.enable": "true",
+    "topic.uncleaderate.enable": "true",
+    
+    "table.include.list": "CBS.ACCOUNTS,CBS.CUSTOMERS,CBS.TRANSACTIONS",
+    
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.core-banking",
+    
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "none",
+    
+    "transforms": "route,unwrap",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "$3",
+    
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.add.fields": "op,table,lsn,source.ts_ms",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
+    
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.core-banking",
+    
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "10000",
+    "snapshot.delay.ms": "0",
+    "poll.interval.ms": "500"
+  }
+}

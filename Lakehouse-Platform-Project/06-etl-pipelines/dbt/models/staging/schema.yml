@@ -1,0 +1,121 @@
+# =============================================================================
+# SCHEMA FILE: Staging Models
+# =============================================================================
+# Purpose: Define schema and tests for staging models
+# =============================================================================
+
+version: 2
+
+models:
+  - name: stg_customers
+    description: "Cleaned and validated customer data"
+    columns:
+      - name: customer_id
+        description: "Unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_name
+        description: "Customer full name"
+        tests:
+          - not_null
+      - name: email
+        description: "Customer email address"
+        tests:
+          - accepted_values:
+              values: ['%@"%"."%"']
+              config:
+                where: "email IS NOT NULL"
+      - name: phone
+        description: "Customer phone number"
+        tests:
+          - accepted_values:
+              values: ['^[0-9]{10,15}$']
+              config:
+                where: "phone IS NOT NULL"
+
+  - name: stg_accounts
+    description: "Cleaned and validated account data"
+    columns:
+      - name: account_id
+        description: "Unique account identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+      - name: current_balance
+        description: "Current account balance"
+        tests:
+          - not_null
+      - name: account_type_standardized
+        description: "Standardized account type"
+        tests:
+          - accepted_values:
+              values: ['SAVINGS', 'CURRENT', 'FIXED_DEPOSIT', 'RECURRING_DEPOSIT', 'OTHER']
+
+  - name: stg_transactions
+    description: "Cleaned and validated transaction data"
+    columns:
+      - name: txn_id
+        description: "Unique transaction identifier"
+        tests:
+          - unique
+          - not_null
+      - name: account_id
+        description: "Foreign key to account"
+        tests:
+          - not_null
+      - name: amount
+        description: "Transaction amount"
+        tests:
+          - not_null
+      - name: txn_type_standardized
+        description: "Standardized transaction type"
+        tests:
+          - accepted_values:
+              values: ['CREDIT', 'DEBIT', 'TRANSFER', 'OTHER']
+
+  - name: stg_cards
+    description: "Cleaned and validated credit card data"
+    columns:
+      - name: card_number
+        description: "Unique card identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+      - name: card_limit
+        description: "Credit card limit"
+        tests:
+          - not_null
+
+  - name: stg_loans
+    description: "Cleaned and validated loan data"
+    columns:
+      - name: loan_id
+        description: "Unique loan identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+      - name: principal_amount
+        description: "Loan principal amount"
+        tests:
+          - not_null
+      - name: loan_type_standardized
+        description: "Standardized loan type"
+        tests:
+          - accepted_values:
+              values: ['HOME_LOAN', 'PERSONAL_LOAN', 'CAR_LOAN', 'BUSINESS_LOAN', 'EDUCATION_LOAN', 'GOLD_LOAN', 'OTHER']

@@ -1,0 +1,42 @@
+{
+  "name": "cards-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mainframe.MainframeConnector",
+    "database.hostname": "mainframe-cards",
+    "database.port": "23",
+    "database.user": "${FILE:/opt/kafka/secrets/mainframe-user}",
+    "database.password": "${FILE:/opt/kafka/secrets/mainframe-password}",
+    "database.server.name": "cards-system",
+    
+    "topic.prefix": "cards-system",
+    "topic.creation.enable": "true",
+    
+    "table.include.list": "CCD.CARDS,CCD.CARD_TRANSACTIONS,CCD.STATEMENTS",
+    
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.cards-system",
+    
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "none",
+    
+    "transforms": "route,unwrap",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "([^.]+)\\.([^.]+)\\.([^.]+)",
+    "transforms.route.replacement": "$3",
+    
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.add.fields": "op,table,lsn,source.ts_ms",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
+    
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "database.history.kafka.topic": "schema-changes.cards-system",
+    
+    "tombstones.on.delete": "true",
+    "heartbeat.interval.ms": "10000"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "reflectionName": "customer-360-raw-reflection",
+  "reflectionType": "RAW",
+  "datasetDetails": {
+    "datasetPath": ["banking-gold", "customer_360"],
+    "datasetId": null
+  },
+  "intelligence": {
+    "layout": {
+      "dimensions": [
+        {"name": "customer_id"},
+        {"name": "customer_name"},
+        {"name": "city"},
+        {"name": "state"}
+      ],
+      "measures": [
+        {"name": "total_accounts"},
+        {"name": "total_balance"},
+        {"name": "total_card_limit"},
+        {"name": "total_card_outstanding"},
+        {"name": "total_loan_amount"},
+        {"name": "total_loan_outstanding"},
+        {"name": "net_relationship_value"}
+      ],
+      "sorts": [
+        {"name": "customer_id", "direction": "ASC"}
+      ]
+    },
+    "approxStats": {
+      "inputRecords": 1000000,
+      "outputRecords": 1000000,
+      "totalSize": 524288000
+    }
+  },
+  "refresh": {
+    "refreshStrategy": "FULL",
+    "schedule": "0 */2 * * *",  -- Every 2 hours
+    "incrementalRefreshSql": null
+  },
+  "status": {
+    "state": "NEW",
+    "refreshProgress": 100
+  },
+  "automation": {
+    "enabled": true,
+    "accelerationGracePeriodMs": 1800000,  -- 30 minutes
+    "favorite": true
+  },
+  "accessControlList": [
+    {
+      "grantee": {
+        "type": "group",
+        "name": "data-analysts"
+      },
+      "permissions": ["READ"]
+    }
+  ]
+}
