@@ -1,0 +1,67 @@
+version: 2
+
+models:
+  - name: int_customer_accounts
+    description: "Aggregated account data per customer"
+    columns:
+      - name: customer_id
+        description: "Unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      - name: total_accounts
+        description: "Total number of accounts"
+        tests:
+          - not_null
+      - name: total_balance
+        description: "Total balance across all accounts"
+        tests:
+          - not_null
+      - name: primary_account_type
+        description: "Most common account type"
+        tests:
+          - not_null
+
+  - name: int_customer_cards
+    description: "Aggregated card data per customer"
+    columns:
+      - name: customer_id
+        description: "Unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      - name: total_cards
+        description: "Total number of cards"
+        tests:
+          - not_null
+      - name: total_credit_limit
+        description: "Total credit limit across all cards"
+        tests:
+          - not_null
+      - name: total_outstanding
+        description: "Total outstanding balance"
+        tests:
+          - not_null
+
+  - name: int_customer_loans
+    description: "Aggregated loan data per customer"
+    columns:
+      - name: customer_id
+        description: "Unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      - name: total_loans
+        description: "Total number of loans"
+        tests:
+          - not_null
+      - name: total_principal_outstanding
+        description: "Total principal outstanding"
+        tests:
+          - not_null
+      - name: has_npa
+        description: "Flag if customer has NPA"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]

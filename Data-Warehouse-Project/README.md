@@ -125,51 +125,142 @@ Data-Warehouse-Project/
 ├── 04-etl-pipelines/                      # Data engineering pipelines
 │   ├── airflow/dags/                      # Airflow DAGs
 │   │   ├── extract_source_data.py
+│   │   ├── extract_source_data_with_error_handling.py  # NEW
 │   │   ├── load_dimensions.py
 │   │   ├── load_facts.py
-│   │   └── refresh_aggregations.py
-│   └── dbt/                               # dbt transformations
-│       ├── dbt_project.yml
-│       └── models/
-│           ├── sources.yml
-│           ├── staging/
-│           ├── intermediate/
-│           └── marts/
+│   │   ├── cdc_pipeline.py                # NEW: CDC pipeline
+│   │   └── README.md                      # NEW: DAGs documentation
+│   ├── cdc/                               # NEW: CDC metadata
+│   │   └── metadata/cdc_metadata.sql
+│   ├── dbt/                               # dbt transformations
+│   │   ├── dbt_project.yml
+│   │   └── models/
+│   │       ├── sources.yml
+│   │       ├── staging/
+│   │       ├── intermediate/
+│   │       └── marts/
+│   └── README.md                          # NEW: ETL pipelines guide
 │
 ├── 05-banking-scenarios/                  # Real-world use cases
 │   ├── 01-customer-analytics/             # Customer segmentation, 360
+│   │   └── customer_360.sql
 │   ├── 02-financial-reporting/            # P&L, balance sheet
+│   │   └── pnl_report.sql
 │   ├── 03-regulatory-reports/             # SBV compliance, Basel III
-│   └── 04-executive-dashboards/           # CEO dashboard, KPIs
+│   ├── 04-executive-dashboards/           # CEO dashboard, KPIs
+│   └── README.md                          # NEW: Banking scenarios guide
 │
 ├── 06-data-quality/                       # Data quality framework
 │   ├── tests/                             # Validation tests
-│   └── alerts/                            # Alert rules
+│   │   └── uniqueness_test.sql
+│   ├── alerts/                            # Alert rules
+│   │   └── freshness_alert.sql
+│   └── README.md                          # NEW: Data quality guide
+│
+├── 06-dbt-models/                         # NEW: dbt transformations
+│   ├── dbt_project.yml
+│   └── models/
+│       ├── staging/
+│       │   ├── sources.yml
+│       │   ├── schema.yml                 # NEW: dbt tests
+│       │       ├── stg_customers.sql
+│       │       ├── stg_accounts.sql
+│       │       └── stg_transactions.sql
+│       ├── intermediate/
+│       │   ├── schema.yml                 # NEW: dbt tests
+│       │   └── int_customer_accounts.sql
+│       └── marts/
+│           ├── schema.yml                 # NEW: dbt tests
+│           ├── dim_customer.sql
+│           └── fact_transactions.sql
 │
 ├── 08-monitoring/                         # Monitoring stack
 │   ├── prometheus/                        # Metrics collection
-│   └── grafana/                           # Dashboards
+│   │   └── prometheus.yml
+│   ├── grafana/                           # Dashboards
+│   │   ├── dashboards/overview.json
+│   │   └── datasources/prometheus.yml
+│   └── README.md
 │
 ├── 09-security/                           # Security hardening
 │   ├── access-control/                    # RBAC setup
+│   │   ├── role-hierarchy.sql
+│   │   └── row-level-security.sql
 │   ├── audit/                             # Audit logging
-│   └── encryption/                        # TLS/SSL config
+│   │   └── audit_setup.sql
+│   ├── encryption/                        # TLS/SSL config
+│   │   └── encryption_setup.sql
+│   └── README.md
 │
 ├── 10-performance/                        # Optimization guide
 │   ├── indexing/                           # Index strategies
+│   │   └── indexing_strategies.sql
 │   ├── partitioning/                      # Table partitioning
-│   └── tuning/                            # Query optimization
+│   │   └── partitioning_strategies.sql
+│   ├── tuning/                            # Query optimization
+│   │   └── query_optimization.sql
+│   └── README.md
 │
 ├── 11-scripts/                            # Utility scripts
 │   ├── setup.sh                           # One-click setup
 │   ├── teardown.sh                        # Cleanup
 │   ├── backup.sh                          # Backup
-│   └── seed-all-data.sh                   # Load sample data
+│   ├── seed-all-data.sh                   # Load sample data
+│   └── README.md
 │
-└── 12-docs/                               # Documentation
-    ├── architecture-decision-records/     # ADRs
-    ├── tutorials/                         # Step-by-step guides
-    └── glossary.md                        # Banking terms
+├── 12-docs/                               # Documentation
+│   ├── architecture-decision-records/     # ADRs
+│   │   └── ADR-001-postgresql-selection.md
+│   ├── tutorials/                         # Step-by-step guides
+│   │   └── getting_started.md
+│   └── README.md
+│
+├── 13-data-quality-pipeline/              # NEW: DQ pipeline (Airflow)
+│   ├── config/
+│   │   ├── quality_rules.yml
+│   │   └── alert_thresholds.yml
+│   ├── metadata/
+│   │   ├── dq_rule_catalog.sql
+│   │   ├── dq_test_results.sql
+│   │   ├── dq_quality_scores.sql
+│   │   ├── dq_anomalies.sql
+│   │   └── dq_quality_dashboard.sql
+│   ├── checks/
+│   │   └── run_all_checks.py
+│   ├── pipelines/airflow/dags/
+│   │   └── data_quality_dag.py
+│   ├── reports/
+│   │   └── daily_quality_summary.sql
+│   └── README.md
+│
+├── 14-data-lineage-pipeline/              # NEW: Lineage tracking
+│   ├── metadata/
+│   │   ├── lineage_nodes.sql
+│   │   ├── lineage_edges.sql
+│   │   ├── lineage_column_map.sql
+│   │   ├── lineage_transforms.sql
+│   │   └── lineage_views.sql
+│   ├── analysis/
+│   │   ├── impact_analysis.sql
+│   │   └── root_cause_analysis.sql
+│   ├── pipelines/airflow/dags/
+│   │   └── lineage_pipeline_dag.py
+│   └── README.md
+│
+├── .github/workflows/                     # NEW: CI/CD pipelines
+│   ├── test.yml                           # Testing workflow
+│   ├── deploy.yml                         # Deployment workflow
+│   └── quality.yml                        # Data quality checks
+│
+├── terraform/                             # NEW: Infrastructure as Code
+│   ├── main.tf                            # Main configuration
+│   ├── variables.tf                       # Variables
+│   ├── outputs.tf                         # Outputs
+│   └── README.md
+│
+└── tests/                                 # NEW: Unit tests
+    ├── test_etl_pipelines.py              # ETL logic tests
+    └── requirements.txt
 ```
 
 ---
@@ -294,11 +385,24 @@ psql -U dw_admin -d banking_dw -c "SELECT * FROM fact_transactions LIMIT 10;"
 ## Project Structure
 
 ```
-Total Folders:  14
-Total Files:    50+
-Languages:      SQL, Python, Shell, YAML
-Tools:          PostgreSQL, Airflow, dbt, Grafana
+Total Folders:  18+
+Total Files:    100+
+Languages:      SQL, Python, Shell, YAML, HCL
+Tools:          PostgreSQL, Airflow, dbt, Grafana, Terraform
 ```
+
+---
+
+## New Features Added
+
+| Feature | Folder | Purpose |
+|---------|--------|---------|
+| **dbt Tests** | `06-dbt-models/models/*/schema.yml` | Data validation tests |
+| **Error Handling** | `04-etl-pipelines/airflow/dags/` | Robust failure recovery |
+| **CI/CD** | `.github/workflows/` | Automated testing/deployment |
+| **Terraform** | `terraform/` | Infrastructure as Code |
+| **Unit Tests** | `tests/` | ETL logic validation |
+| **CDC Pipeline** | `04-etl-pipelines/cdc/` | Real-time data sync |
 
 ---
 

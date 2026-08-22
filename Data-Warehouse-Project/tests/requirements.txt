@@ -1,0 +1,25 @@
+# Testing Framework
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-html>=3.2.0
+
+# Data Processing
+pandas>=1.5.0
+numpy>=1.23.0
+
+# Database
+psycopg2-binary>=2.9.0
+sqlalchemy>=1.4.0
+
+# ETL
+apache-airflow>=2.5.0
+dbt-postgres>=1.5.0
+
+# Utilities
+python-dotenv>=0.20.0
+pyyaml>=6.0
+
+# Code Quality
+flake8>=5.0.0
+black>=22.0.0
+isort>=5.0.0

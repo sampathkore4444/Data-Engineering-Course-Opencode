@@ -1,0 +1,251 @@
+version: 2
+
+models:
+  - name: dim_customer
+    description: "Final customer dimension with SCD Type 2"
+    columns:
+      - name: customer_sk
+        description: "Surrogate key"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Natural key from source"
+        tests:
+          - not_null
+      - name: customer_name
+        description: "Customer full name"
+        tests:
+          - not_null
+      - name: customer_type
+        description: "Type of customer"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Individual', 'Corporate', 'Other']
+      - name: email
+        description: "Customer email"
+        tests:
+          - not_null
+      - name: phone
+        description: "Customer phone"
+        tests:
+          - not_null
+      - name: is_current
+        description: "Flag for current record"
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: valid_from
+        description: "SCD valid from timestamp"
+        tests:
+          - not_null
+      - name: valid_to
+        description: "SCD valid to timestamp"
+
+  - name: dim_account
+    description: "Account dimension"
+    columns:
+      - name: account_sk
+        description: "Surrogate key"
+        tests:
+          - unique
+          - not_null
+      - name: account_id
+        description: "Natural key from source"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_id
+      - name: account_type
+        description: "Type of account"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['SAVINGS', 'CURRENT', 'FIXED_DEPOSIT']
+      - name: balance
+        description: "Current balance"
+        tests:
+          - not_null
+      - name: status
+        description: "Account status"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE', 'INACTIVE', 'DORMANT', 'CLOSED']
+
+  - name: dim_date
+    description: "Calendar dimension"
+    columns:
+      - name: date_key
+        description: "Date key (YYYYMMDD)"
+        tests:
+          - unique
+          - not_null
+      - name: full_date
+        description: "Full date"
+        tests:
+          - unique
+          - not_null
+      - name: year
+        description: "Year"
+        tests:
+          - not_null
+      - name: month_name
+        description: "Month name"
+        tests:
+          - not_null
+
+  - name: dim_branch
+    description: "Branch dimension"
+    columns:
+      - name: branch_sk
+        description: "Surrogate key"
+        tests:
+          - unique
+          - not_null
+      - name: branch_id
+        description: "Natural key"
+        tests:
+          - unique
+          - not_null
+      - name: branch_name
+        description: "Branch name"
+        tests:
+          - not_null
+      - name: region
+        description: "Region"
+        tests:
+          - not_null
+
+  - name: dim_product
+    description: "Product dimension"
+    columns:
+      - name: product_sk
+        description: "Surrogate key"
+        tests:
+          - unique
+          - not_null
+      - name: product_id
+        description: "Natural key"
+        tests:
+          - unique
+          - not_null
+      - name: product_name
+        description: "Product name"
+        tests:
+          - not_null
+      - name: product_category
+        description: "Product category"
+        tests:
+          - not_null
+
+  - name: fact_transactions
+    description: "Transaction fact table"
+    columns:
+      - name: transaction_sk
+        description: "Surrogate key"
+        tests:
+          - unique
+          - not_null
+      - name: transaction_id
+        description: "Natural key"
+        tests:
+          - unique
+          - not_null
+      - name: customer_sk
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_sk
+      - name: account_sk
+        description: "Foreign key to account"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_account')
+              field: account_sk
+      - name: date_key
+        description: "Foreign key to date"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: amount
+        description: "Transaction amount"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: fact_account_balance
+    description: "Daily account balance snapshot"
+    columns:
+      - name: balance_sk
+        description: "Surrogate key"
+        tests:
+          - unique
+          - not_null
+      - name: account_sk
+        description: "Foreign key to account"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_account')
+              field: account_sk
+      - name: date_key
+        description: "Foreign key to date"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: balance
+        description: "Account balance"
+        tests:
+          - not_null
+
+  - name: fact_loan_payment
+    description: "Loan payment fact table"
+    columns:
+      - name: payment_sk
+        description: "Surrogate key"
+        tests:
+          - unique
+          - not_null
+      - name: customer_sk
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customer')
+              field: customer_sk
+      - name: date_key
+        description: "Foreign key to date"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: principal_amount
+        description: "Principal payment"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: interest_amount
+        description: "Interest payment"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0

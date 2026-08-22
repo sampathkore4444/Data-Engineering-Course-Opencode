@@ -1,0 +1,108 @@
+name: Data Quality Checks
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6 AM
+  workflow_dispatch:
+
+jobs:
+  quality-check:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: banking_dw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install psycopg2-binary pandas
+
+    - name: Initialize database with data
+      run: |
+        PGPASSWORD=postgres psql -h localhost -U postgres -d banking_dw -f 03-star-schema/scripts/create_schema.sql
+        PGPASSWORD=postgres psql -h localhost -U postgres -d banking_dw -f 11-scripts/seed-all-data.sh
+
+    - name: Run Uniqueness Tests
+      run: |
+        echo "Running uniqueness tests..."
+        PGPASSWORD=postgres psql -h localhost -U postgres -d banking_dw -f 06-data-quality/tests/uniqueness_test.sql
+
+    - name: Run Freshness Checks
+      run: |
+        echo "Running freshness checks..."
+        PGPASSWORD=postgres psql -h localhost -U postgres -d banking_dw -f 06-data-quality/alerts/freshness_alert.sql
+
+    - name: Run Completeness Tests
+      run: |
+        echo "Running completeness tests..."
+        PGPASSWORD=postgres psql -h localhost -U postgres -d banking_dw -c "
+        SELECT 
+          'dim_customer' AS table_name,
+          COUNT(*) AS total_rows,
+          SUM(CASE WHEN customer_id IS NULL THEN 1 ELSE 0 END) AS null_count
+        FROM gold.dim_customer
+        UNION ALL
+        SELECT 
+          'dim_account',
+          COUNT(*),
+          SUM(CASE WHEN account_id IS NULL THEN 1 ELSE 0 END)
+        FROM gold.dim_account
+        UNION ALL
+        SELECT 
+          'fact_transactions',
+          COUNT(*),
+          SUM(CASE WHEN transaction_id IS NULL THEN 1 ELSE 0 END)
+        FROM gold.fact_transactions;
+        "
+
+    - name: Generate Quality Report
+      if: always()
+      run: |
+        echo "Generating quality report..."
+        PGPASSWORD=postgres psql -h localhost -U postgres -d banking_dw -c "
+        SELECT 
+          'Uniqueness' AS check_type,
+          CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END AS status
+        FROM (
+          SELECT customer_id, COUNT(*) as cnt
+          FROM gold.dim_customer
+          GROUP BY customer_id
+          HAVING COUNT(*) > 1
+        ) duplicates
+        UNION ALL
+        SELECT 
+          'Freshness',
+          CASE 
+            WHEN MAX(updated_at) > CURRENT_TIMESTAMP - INTERVAL '24 hours' THEN 'PASS'
+            ELSE 'FAIL'
+          END
+        FROM staging.stg_customers;
+        " > quality-report.txt
+
+    - name: Upload quality report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: quality-report
+        path: quality-report.txt

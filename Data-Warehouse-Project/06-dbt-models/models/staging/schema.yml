@@ -1,0 +1,194 @@
+version: 2
+
+sources:
+  - name: staging
+    database: banking_dw
+    schema: staging
+    tables:
+      - name: stg_customers
+        description: "Cleaned customer data from core banking"
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 24, period: hour}
+      - name: stg_accounts
+        description: "Cleaned account data from core banking"
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 24, period: hour}
+      - name: stg_transactions
+        description: "Cleaned transaction data from core banking"
+        loaded_at_field: created_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 24, period: hour}
+      - name: stg_cards
+        description: "Cleaned card data from cards system"
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 24, period: hour}
+      - name: stg_loans
+        description: "Cleaned loan data from loans system"
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: {count: 12, period: hour}
+          error_after: {count: 24, period: hour}
+
+models:
+  - name: stg_customers
+    description: "Cleaned and standardized customer data"
+    columns:
+      - name: customer_id
+        description: "Unique customer identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_name
+        description: "Customer full name"
+        tests:
+          - not_null
+      - name: customer_type
+        description: "Type of customer (Individual/Corporate)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Individual', 'Corporate', 'Other']
+      - name: phone
+        description: "Customer phone number"
+        tests:
+          - not_null
+      - name: email
+        description: "Customer email address"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: "'a'"
+
+  - name: stg_accounts
+    description: "Cleaned and validated account data"
+    columns:
+      - name: account_id
+        description: "Unique account identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+      - name: account_type
+        description: "Type of account"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['SAVINGS', 'CURRENT', 'FIXED_DEPOSIT']
+      - name: balance
+        description: "Current account balance"
+        tests:
+          - not_null
+      - name: status
+        description: "Account status"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ACTIVE', 'INACTIVE', 'DORMANT', 'CLOSED']
+
+  - name: stg_transactions
+    description: "Cleaned and enriched transaction data"
+    columns:
+      - name: transaction_id
+        description: "Unique transaction identifier"
+        tests:
+          - unique
+          - not_null
+      - name: account_id
+        description: "Foreign key to account"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_accounts')
+              field: account_id
+      - name: transaction_type
+        description: "Type of transaction"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['CREDIT', 'DEBIT', 'TRANSFER']
+      - name: amount
+        description: "Transaction amount"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: transaction_date
+        description: "Date of transaction"
+        tests:
+          - not_null
+
+  - name: stg_cards
+    description: "Cleaned credit card data"
+    columns:
+      - name: card_id
+        description: "Unique card identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+      - name: card_type
+        description: "Type of card"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['VISA', 'MASTERCARD', 'AMEX']
+      - name: credit_limit
+        description: "Card credit limit"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: stg_loans
+    description: "Cleaned loan data"
+    columns:
+      - name: loan_id
+        description: "Unique loan identifier"
+        tests:
+          - unique
+          - not_null
+      - name: customer_id
+        description: "Foreign key to customer"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+      - name: loan_type
+        description: "Type of loan"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['HOME_LOAN', 'PERSONAL_LOAN', 'CAR_LOAN', 'BUSINESS_LOAN']
+      - name: principal_amount
+        description: "Original loan amount"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: interest_rate
+        description: "Annual interest rate"
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 50
