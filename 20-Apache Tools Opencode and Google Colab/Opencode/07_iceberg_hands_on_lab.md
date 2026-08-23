@@ -45,6 +45,56 @@ We replay the three tickets against one table using PyIceberg:
    then TAG the quarter-end snapshot so retention jobs can never expire it - and see why
    physical expiry itself is an engine job.
 
+---
+
+## 2.1. Real-world banking scenario: the three tickets (WITHOUT vs WITH Iceberg)
+
+**Business context**: Monday morning at Meridian Trust. Three urgent tickets land:
+
+### Ticket 1: Quarter-end audit proof
+
+| | WITHOUT Iceberg (Plain Parquet) | WITH Iceberg |
+|---|---|---|
+| **Request** | "Prove the ledger as of June 30th" | Same |
+| **Approach** | Restore from backup (hours) | Time travel to snapshot (seconds) |
+| **Proof** | Hope backup matches actual state | Query: `VERSION AS OF snapshot_id` |
+| **Risk** | Backup may be incomplete/corrupt | Snapshots are immutable, verifiable |
+| **Result** | COMPLIANCE FINDING | PASS |
+
+### Ticket 2: Correct 1,000 mis-bucketed transactions
+
+| | WITHOUT Iceberg | WITH Iceberg |
+|---|---|---|
+| **Request** | Fix MCC 5541 → 5812 for 1,000 txns | Same |
+| **Approach** | Rewrite entire Parquet file | MoR delete + re-append |
+| **Concurrent reads** | May see partial state (corruption!) | MVCC: readers see consistent snapshot |
+| **Audit trail** | None (original data overwritten) | Both versions preserved (5541 and 5812) |
+| **Result** | RISK OF CORRUPTION | SAFE, AUDITABLE |
+
+### Ticket 3: Fix 11,000 tiny files
+
+| | WITHOUT Iceberg | WITH Iceberg |
+|---|---|---|
+| **Request** | "Scans are crawling" | Same |
+| **Approach** | Manually merge files (risky) | Atomic overwrite (one commit) |
+| **Atomicity** | No guarantee (partial merge possible) | All-or-nothing commit |
+| **History** | Lost if files overwritten | Preserved via snapshots |
+| **Result** | FRAGILE | SAFE, REVERSIBLE |
+
+### Summary: what Iceberg provides
+
+| Capability | Plain Parquet | Iceberg | Why it matters |
+|---|---|---|---|
+| **Time travel** | ❌ Impossible | ✅ Query any snapshot | Audit proof, debugging |
+| **ACID commits** | ❌ No atomicity | ✅ Atomic pointer swap | Concurrent safety |
+| **Row-level deletes** | ❌ Rewrite files | ✅ MoR delete files | GDPR, corrections |
+| **Schema evolution** | ❌ Rewrite files | ✅ Metadata-only changes | Add columns safely |
+| **Partition evolution** | ❌ Rewrite files | ✅ Metadata-only changes | Change partitioning |
+| **Snapshot tagging** | ❌ No concept | ✅ Immutable audit pins | Regulatory compliance |
+| **Rollback** | ❌ Manual restore | ✅ Atomic pointer move | Undo mistakes instantly |
+
+---
+
 ## 3. End-to-end example
 
 ```python

@@ -512,6 +512,9 @@ query is in the Flight SQL audit log.
    the same Bronze input, and prove the Silver row count doesn't double.
 8. Build a lineage chain: Bronze → Silver → Gold with metadata tags at each step.
    Query the Gold table and trace back to the exact Bronze source file.
+9. **Serialization budget**: add `time.perf_counter()` around every `to_*()`, `from_*()`,
+   `read_*()`, `write_*()` call in the pipeline. Which boundary dominates? Replace it
+   with an Arrow kernel and measure the improvement.
 
 ## 8. Cheat sheet
 
@@ -533,6 +536,8 @@ query is in the Flight SQL audit log.
 | Metadata bloat | expire_snapshots on schedule; keep audit-required tags forever |
 | Orphans | remove_orphan_files weekly with generous safety windows |
 | Governance | catalog authZ + gateway roles + audit logs + snapshot proofs |
+| **Arrow data movement** | **Parquet→Arrow decode: ~0.3s/2M rows; zero-copy handoff to DuckDB: ~0.001s (L03/04)** |
+| **Serialization savings** | **Arrow IPC 24× faster than CSV; full pipeline 12× faster with kernels vs Python loops** |
 
 **Next:** Lesson 11 - the capstone. Ingest, store, transact, audit, and serve:
 you build Meridian's miniature lakehouse end to end and answer four real banking

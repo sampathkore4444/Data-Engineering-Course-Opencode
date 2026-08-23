@@ -37,8 +37,8 @@ Read in order — each lesson builds on the previous one.
 |---|--------|----------------------|
 | 01 | [`01_columnar_storage_fundamentals.md`](01_columnar_storage_fundamentals.md) | Row vs column layout, why OLAP loves columns, encodings (RLE, dictionary, delta), compression |
 | 02 | [`02_parquet_file_format.md`](02_parquet_file_format.md) | Parquet internals: row groups, column chunks, pages, footer metadata, predicate pushdown, partitioned datasets, bloom filter trade-offs, time zone handling |
-| 03 | [`03_arrow_in_memory_format.md`](03_arrow_in_memory_format.md) | The Arrow memory model: buffers, validity bitmaps, offset arrays, RecordBatch/Table, zero-copy IPC |
-| 04 | [`04_pyarrow_hands_on_lab.md`](04_pyarrow_hands_on_lab.md) | PyArrow in practice: arrays, compute kernels, pandas interop, datasets API, streaming batches |
+| 03 | [`03_arrow_in_memory_format.md`](03_arrow_in_memory_format.md) | The Arrow memory model: buffers, validity bitmaps, offset arrays, RecordBatch/Table, zero-copy IPC, **serialization anatomy & benchmarks** |
+| 04 | [`04_pyarrow_hands_on_lab.md`](04_pyarrow_hands_on_lab.md) | PyArrow in practice: arrays, compute kernels, pandas interop, datasets API, streaming batches, **serialization audit & pipeline benchmarks** |
 | 05 | [`05_duckdb_analytical_engine.md`](05_duckdb_analytical_engine.md) | Embedded OLAP with DuckDB: vectorized execution, direct Parquet queries, Arrow interchange, ASOF joins, window functions, concurrency model, DuckDB vs Spark decision guide |
 | 06 | [`06_iceberg_table_format.md`](06_iceberg_table_format.md) | Why "just files" breaks; Iceberg snapshots, manifests, time travel, hidden partitioning, schema/partition evolution (type widening, nested fields), catalogs, PCI-DSS column-level security |
 | 07 | [`07_iceberg_hands_on_lab.md`](07_iceberg_hands_on_lab.md) | Iceberg with PyIceberg + DuckDB + Spark-style SQL: create tables, upserts, time travel for audits, compaction, maintenance, GDPR cascading deletes, data retention schedules |
@@ -48,6 +48,7 @@ Read in order — each lesson builds on the previous one.
 | 11 | [`11_capstone_banking_project.md`](11_capstone_banking_project.md) | End-to-end capstone: ingest → Parquet/Iceberg → fraud & regulatory analytics → serve via Flight SQL |
 | 12 | [`12_object_storage_data_lake.md`](12_object_storage_data_lake.md) | Object storage semantics: flat keys, no renames, footer-only planning over HTTP range GETs, DuckDB httpfs on S3 |
 | 13 | [`13_spark_distributed_analytics.md`](13_spark_distributed_analytics.md) | Apache Spark: lazy DAGs and shuffles, pushdown proof via EXPLAIN, sliding velocity windows at scale, hive-partitioned write-back, DuckDB vs Spark decision matrix |
+| 14 | [`14_serialization_reference_guide.md`](14_serialization_reference_guide.md) | **Serialization reference**: consolidated benchmarks, BEFORE/AFTER scenarios, decision guide, and code snippets from Lessons 03–13 |
 
 ## Where DuckDB fits
 
