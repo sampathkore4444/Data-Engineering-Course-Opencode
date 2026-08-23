@@ -1,0 +1,20 @@
+# FinBank Modern Data Engineering Masterclass — full course environment
+# Install: pip install -r requirements.txt
+#
+# Lessons 1-3 (columnar storage, Arrow, DuckDB)
+pyarrow>=15.0
+duckdb>=0.10
+polars>=0.20
+pandas>=2.0
+numpy>=1.26
+
+# Lesson 4 (Iceberg — SQLite catalog + Arrow I/O)
+pyiceberg[sql-sqlite,pyarrow]>=0.8
+
+# Lesson 5 (Flight SQL clients / ADBC ecosystem)
+adbc-driver-manager>=0.11
+adbc-driver-flightsql>=0.11
+grpcio>=1.60
+
+# Lesson 6 (Spark — install separately if you need the cluster runtime:)
+#   pip install pyspark>=3.5
