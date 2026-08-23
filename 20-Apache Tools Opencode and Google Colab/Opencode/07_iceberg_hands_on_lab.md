@@ -287,7 +287,119 @@ current views; nobody rewrites petabytes.
 - **Security**: catalogs/governance layers (Polaris/Lagom/Unity) enforce row/column masks
   at plan time - the table itself never enforces ACLs.
 
-## 6. Exercises
+## 6. GDPR cascading deletes: the full story
+
+A GDPR "right to erasure" request doesn't just delete one row. In a lakehouse, deleting
+a customer touches **every zone and every table** that references them:
+
+```
+GDPR REQUEST: Erase customer C-88412
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ZONE       TABLE              OPERATION                     │
+├─────────────────────────────────────────────────────────────┤
+│  Bronze     raw_events         delete WHERE customer_id=C-88412 │
+│  Silver     card_txns          delete WHERE card_id IN (..)    │
+│  Gold       fraud_features     delete WHERE card_id IN (..)    │
+│  Gold       customer_360       delete WHERE customer_id=C-88412 │
+│  Gold       regulatory_mart    aggregate rows (already grouped; │
+│                                may need re-aggregation)         │
+│  Archive    yearly_ledger      DO NOT DELETE (regulatory hold!)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**The cascade in detail:**
+
+| Step | What | Why |
+|---|---|---|
+| 1. **Identify** | Find all card_ids belonging to customer C-88412 | A customer may have multiple cards |
+| 2. **Delete from Silver** | `DELETE FROM card_txns WHERE card_id IN (300001, 300002)` | Primary transaction table |
+| 3. **Delete from Gold features** | `DELETE FROM fraud_features WHERE card_id IN (...)` | Derived data referencing the customer |
+| 4. **Delete from Gold customer_360** | `DELETE FROM customer_360 WHERE customer_id = 'C-88412'` | Customer master record |
+| 5. **Re-aggregate regulatory mart** | Rebuild daily volumes excluding deleted rows | Aggregates may shift |
+| 6. **Archive exception** | Retain in yearly_ledger (regulatory hold, 7+ years) | Some data MUST be kept for compliance |
+| 7. **Compact affected partitions** | `rewrite_data_files` on touched partitions | Physically remove data from Parquet files |
+| 8. **Expire old snapshots** | Remove pre-deletion snapshots (after retention period) | Old snapshots contain the erased data |
+
+**The regulatory paradox:** GDPR says erase; banking regulations say retain.
+Resolution: **anonymize in the analytical layer, retain in the audit archive.**
+
+```python
+def gdpr_erase(table, card_ids: list[int], archive_table):
+    """GDPR erasure with regulatory archive exception."""
+    # 1. capture pre-deletion snapshot for audit
+    pre_delete_snapshot = table.current_snapshot().snapshot_id
+    
+    # 2. delete from the main table (MoR)
+    table.delete(f"card_id IN ({','.join(str(c) for c in card_ids)})")
+    
+    # 3. archive BEFORE deletion (regulatory requirement)
+    #    The archive keeps full data for 7+ years (Basel III, SOX)
+    #    but access is restricted to compliance team only
+    pre_delete_data = table.scan(snapshot_id=pre_delete_snapshot).to_arrow()
+    archive_table.append(pre_delete_data.filter(
+        pc.is_in(pre_delete_data.column("card_id"),
+                 value_set=pa.array(card_ids, type=pa.int64()))))
+    
+    # 4. tag the pre-deletion state (never expires)
+    table.manage_snapshots().create_tag(
+        pre_delete_snapshot, f"pre_gdpr_{card_ids[0]}").commit()
+    
+    # 5. log for audit trail
+    print(f"GDPR: erased {len(card_ids)} cards; "
+          f"archived to compliance archive; "
+          f"pre-deletion snapshot tagged.")
+```
+
+**Banking scenario:** Customer C-88412 closes their account and requests data erasure.
+Meridian:
+1. Deletes all rows from Silver/Gold tables (MoR delete files).
+2. Archives the pre-deletion data to a compliance-restricted Iceberg table (7-year retention).
+3. Tags the pre-deletion snapshot so `expire_snapshots` never removes it.
+4. The archived data is accessible ONLY via compliance views (PCI-DSS: no raw PAN).
+5. A year later, the regulator asks for C-88412's transaction history → the archive provides it.
+
+### Data retention schedule: what stays, what goes, and when
+
+| Data type | Retention | Reason |
+|---|---|---|
+| **Raw card events** (Bronze) | 30–90 days | Reprocessing window; compacted to Silver |
+| **Validated transactions** (Silver) | 5–7 years | Regulatory requirement (varies by jurisdiction) |
+| **Fraud features** (Gold) | 2–3 years | Model retraining window |
+| **Customer PII** (Gold) | Until GDPR erasure + 30-day grace | Legal hold |
+| **Regulatory aggregates** (Gold) | 10+ years | Basel III, SOX, MiFID II |
+| **Audit snapshots** (tagged) | Indefinite | Quarter-end proofs, tagged snapshots exempt from expiry |
+| **Iceberg metadata** | Matches data retention | Metadata is small; retain with data |
+| **Orphan files** | 72-hour safety window | Prevent premature deletion of in-use files |
+
+**Enforcement via Iceberg lifecycle:**
+
+```python
+# nightly retention job (conceptual)
+from datetime import datetime, timedelta
+
+# 1. expire snapshots older than 30 days (BUT tagged snapshots are exempt)
+table.manage_snapshots().expire_snapshots(
+    older_than=datetime.now() - timedelta(days=30)
+).commit()
+
+# 2. remove orphan files (weekly, with 72h safety)
+table.manage_snapshots().remove_orphan_files(
+    older_than=datetime.now() - timedelta(hours=72)
+).commit()
+
+# 3. tagged snapshots (quarter_end_2026Q2, pre_gdpr_C88412) are NEVER expired
+#    because the engine checks refs before deleting
+```
+
+> **Interview answer**: "How do you handle GDPR in a data lake?" 
+> "We delete from all active tables via MoR, archive pre-deletion data to a compliance
+> table with restricted access, tag the pre-deletion snapshot to prevent expiry, and log
+> the entire operation for audit. The archived data follows the bank's retention schedule
+> (7+ years for transaction records) and is only accessible through compliance views."
+
+## 7. Exercises
 
 1. The drill tagged the quarter-end state `audit_2026Q2`. Now add a BRANCH
    (`manage_snapshots().create_branch()`) pinned to the same snapshot, append day-31 data
@@ -302,7 +414,7 @@ current views; nobody rewrites petabytes.
 5. Set up a cron-style script skeleton that nightly: compacts, expires 7-day-old snapshots,
    and logs table metrics as JSON for monitoring.
 
-## 7. Cheat sheet
+## 8. Cheat sheet
 
 | Task | PyIceberg |
 |---|---|
@@ -315,6 +427,8 @@ current views; nobody rewrites petabytes.
 | Snapshots | `table.snapshots()`, `manage_snapshots()` |
 | Tag audit state | `table.manage_snapshots().create_tag(snapshot_id, "name").commit()`; read via `table.metadata.refs` |
 | Rollback | `manage_snapshots().rollback_to_snapshot(id)` / `.set_current_snapshot(id)` - moves main, never edits history |
+| GDPR erase | delete from all tables → archive pre-deletion → tag snapshot → compact → log |
+| Retention | expire snapshots older than N days; tagged snapshots exempt; orphan cleanup with 72h safety |
 | Plan check | `len(table.scan().plan_files())` - file count before reading |
 | Interop | `scan.to_arrow()/to_pandas()/to_polars()/to_duckdb(alias)` |
 

@@ -258,7 +258,71 @@ three wins.
   comparably, and needs no JVM. Graduate to Spark when RAM walls, multi-hour batch windows,
   or existing clusters demand it - the query logic ports almost 1:1.
 
-## 6. Exercises
+## 6. DuckDB vs Spark: the complete decision matrix
+
+Both engines read the same Parquet/Iceberg files (Lessons 02, 06). Here is the definitive
+guide for when to use which, with banking-specific reasoning:
+
+| Factor | DuckDB wins | Spark wins |
+|---|---|---|
+| **Data fits in RAM** | ✅ yes, embedded | ❌ overhead unjustified |
+| **Data > 1 machine** | ❌ hard wall | ✅ distributes across fleet |
+| **Query < 5 minutes** | ✅ sub-second to minutes | ❌ JVM startup alone takes seconds |
+| **Query > 10 minutes** | ⚠️ may hit RAM limits | ✅ parallel shuffles |
+| **Interactive/ad-hoc** | ✅ instant startup, REPL-friendly | ❌ cluster provisioning |
+| **Overnight batch ETL** | ✅ if single-node sufficient | ✅ if multi-TB or existing cluster |
+| **Feature engineering** | ✅ for < 10M rows per card | ✅ for 2B+ rows, distributed windows |
+| **Existing Spark cluster** | ❌ why not use it? | ✅ piggyback on infra |
+| **Cost** | ✅ free, runs on laptop | ❌ cluster cost (EMR/Dataproc) |
+| **JVM dependency** | ✅ none | ❌ requires Java + Spark jars |
+| **Concurrency** | single writer, MVCC reads | distributed, many executors |
+| **SQL features** | rich standard SQL + extensions | Spark SQL + DataFrame API |
+
+**The hybrid pattern at Meridian (production reality):**
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         SAME PARQUET LAKE            │
+                    │    s3://meridian/card_txns/          │
+                    └──────────┬──────────┬───────────────┘
+                               │          │
+              ┌────────────────┤          ├────────────────┐
+              ▼                ▼          ▼                ▼
+         DuckDB            DuckDB      Spark            Spark
+      (analyst)          (ETL step)  (overnight)     (feature eng)
+      interactive SQL    transform   2B row velocity  distributed
+      over Parquet       between     window funcs     model training
+                         zones
+```
+
+**Portability: the SQL almost 1:1**
+
+```sql
+-- DuckDB (Lesson 05)
+SELECT card_id, count(*) AS cnt_10m
+FROM txns
+WHERE ts >= now() - INTERVAL '10' MINUTE
+GROUP BY card_id
+HAVING count(*) >= 5;
+
+-- Spark (Lesson 13) - same logic, different window syntax
+SELECT card_id, count(*) AS cnt_10m
+FROM txns
+WHERE ts >= current_timestamp() - INTERVAL 10 MINUTES
+GROUP BY card_id
+HAVING count(*) >= 5;
+
+-- The core SQL (GROUP BY, HAVING, WHERE) is identical.
+-- Only window frame syntax differs (RANGE vs ROWS, INTERVAL syntax).
+```
+
+> **Interview answer**: "We use DuckDB for interactive analytics and lightweight ETL
+> because it starts instantly, needs no cluster, and reads Parquet natively. When data
+> exceeds one machine's RAM or we need distributed window functions over billions of rows,
+> we graduate to Spark. Both engines read the same Parquet/Iceberg files — the lake is
+> the contract, the engine is interchangeable."
+
+## 7. Exercises
 
 1. Re-run with `.master("local[1]")` vs `local[4]` and time the velocity action; explain why
    scaling stops helping once the scan is I/O-bound.
@@ -273,8 +337,13 @@ three wins.
 5. Point Spark at Lesson 12's moto S3 bucket instead of local disk by configuring
    `s3a://` Hadoop-AWS options; confirm identical alert counts. That is storage/compute
    decoupling in one exercise.
+6. Run the velocity query in DuckDB (Lesson 05) on 300K rows, then in Spark on 300K rows.
+   Measure wall-clock time for each. Now scale to 3M rows — which engine handles the 10×
+   increase better and why?
+7. Write the same SQL query in DuckDB and Spark SQL syntax. Identify the syntactic
+   differences (INTERVAL, window functions, GROUP BY ALL). Which differences matter?
 
-## 7. Cheat sheet
+## 8. Cheat sheet
 
 | Task | PySpark |
 |---|---|
@@ -286,6 +355,7 @@ three wins.
 | Sorted output files | `df.sortWithinPartitions(...).write.partitionBy(...).parquet(path)` |
 | Tune shuffle | `spark.sql.shuffle.partitions` (+ AQE coalescing) |
 | Stop cleanly | `spark.stop()` - releases executor threads and temp dirs |
+| vs DuckDB | data fits one machine → DuckDB; multi-TB shuffles → Spark; SQL ports 1:1 |
 
 ---
 

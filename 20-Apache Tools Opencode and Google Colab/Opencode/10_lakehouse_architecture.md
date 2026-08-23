@@ -81,6 +81,71 @@ CDC specifics that bite teams who skip this lesson:
   silver's contract removes).
 - **Late-arriving data** is normal: partition by event time, let compaction absorb stragglers.
 
+### Exactly-once delivery: the full picture
+
+"Exactly-once" is the hardest guarantee in distributed systems. In practice, the lakehouse
+achieves it through a combination of mechanisms, not one silver bullet:
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  EXACTLY-ONCE = AT-MOST-ONCE + AT-LEAST-ONCE + IDEMPOTENT CONSUMER     │
+│                                                                          │
+│  Kafka/Flink provides: at-least-once delivery (retries on failure)       │
+│  Iceberg provides:     atomic commits (no partial writes visible)        │
+│  Silver provides:      idempotent dedup (retries produce same result)    │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+**Layer by layer:**
+
+| Layer | Mechanism | What it prevents |
+|---|---|---|
+| **Kafka consumer** | Offset tracking + `auto.offset.reset=earliest` | Lost events on crash; replay from last committed offset |
+| **Bronze append** | Iceberg atomic commit + unique event ID | Partial writes visible to readers |
+| **Silver dedup** | `drop_duplicates(subset=["txn_id"])` + latest-wins | Duplicate events from retries appearing twice |
+| **Gold aggregate** | Iceberg snapshot isolation | Aggregates computed over consistent state, not mid-write |
+
+**The idempotency pattern in Silver:**
+
+```python
+# Silver pipeline: idempotent by construction
+# Running it 100 times produces the same result as running it once
+
+def silver_transform(bronze_path: str, silver_table) -> int:
+    """Idempotent: dedup by txn_id, latest-wins."""
+    bronze = pd.read_csv(bronze_path)
+    
+    # dedup: if same txn_id appears 3 times (retries), keep the latest
+    bronze = bronze.sort_values("ts").drop_duplicates(
+        subset=["txn_id"], keep="last")
+    
+    # validate
+    clean = bronze.dropna(subset=["amount"])
+    clean = clean[clean["amount"] > 0]
+    
+    # append to Iceberg (atomic commit)
+    silver_table.append(pa.Table.from_pandas(clean))
+    return len(clean)
+```
+
+**Why retries are safe:** If the ETL job crashes after writing but before committing,
+Iceberg's atomic pointer swap means the data is either fully visible or fully invisible.
+On retry, the same data is written again; Silver's dedup collapses the duplicates.
+
+**Watermark tracking (Kafka → Bronze):**
+
+```python
+# track the last processed Kafka offset per partition
+# stored in a small metadata table (DuckDB or Iceberg)
+last_offsets = {
+    "partition_0": 1_234_567,
+    "partition_1": 987_654,
+}
+
+# on restart: resume from last committed offset, not from beginning
+# this gives at-least-once delivery; dedup in Silver makes it effectively exactly-once
+```
+
 ### 2.2 Quality gates between zones
 
 Zone crossings are *contract checkpoints*, not just copies. Bronze→silver and silver→gold
@@ -138,6 +203,86 @@ fragmented manifests ◀── rewrite_manifests
 Bank policy example: card events stream in → compact nightly at 02:00 → expire
 snapshots older than 35 days EXCEPT tagged quarter-end ones (regulators!) → orphan
 sweep weekly with 72h safety window.
+
+### The small-file problem, quantified
+
+Small files are not just "slightly slower" — they can make queries 100× worse:
+
+| Metric | 10 files × 512 MB | 10,000 files × 512 KB |
+|---|---|---|
+| **S3 LIST requests** | 1 LIST page | 10 LIST pages (10× overhead) |
+| **Footer reads** | 10 × 5 KB = 50 KB | 10,000 × 5 KB = **50 MB** |
+| **Planning time (S3)** | ~50 ms | ~5–30 seconds |
+| **File handles open** | 10 | 10,000 (may hit OS limits!) |
+| **S3 request cost** | $0.0005 | $0.05 (100× cost) |
+| **Parquet row groups** | 10 × 5 = 50 | 10,000 × 1 = 10,000 |
+| **Manifest entries (Iceberg)** | 10 | 10,000 (slow planning) |
+
+**The compounding effect:** planning time is O(files), and on object stores each file
+requires a separate HTTP GET for the footer. A 100K-file table with 5KB footers means
+500 MB of metadata downloads *before a single data byte is read.*
+
+**Real-world example at Meridian:** card events stream at 10K events/second. After 24 hours:
+- Without compaction: 86,400 micro-batch files × 50 KB each = 4.3 GB total, but
+  planning takes 45 seconds just to list and read footers.
+- After nightly compaction: 24 files × 180 MB each = 4.3 GB total, planning takes 200 ms.
+- Same data, same size, **225× faster planning**.
+
+### Compaction strategy deep dive: bin-pack vs sort-merge
+
+Not all compaction is the same. The strategy depends on your access patterns:
+
+| Strategy | What it does | When to use |
+|---|---|---|
+| **Bin-pack** | Merge small files into target-size files; no reordering | Streaming ingest (many tiny files, order doesn't matter) |
+| **Sort-merge** | Bin-pack AND sort rows within each file by a key | Range queries on sort key (e.g., `ts` for time-series) |
+| **Z-order** | Bin-pack AND cluster by multiple columns | Multi-dimensional predicates (e.g., `card_id` AND `ts`) |
+
+**Bin-pack (default):**
+```
+Before:  [64KB][64KB][64KB][64KB][64KB]...  (100 files)
+After:   [256MB][256MB][256MB]...           (3 files)
+Rows within each file: arbitrary order
+```
+
+**Sort-merge (better for time-series):**
+```
+Before:  [64KB day1+day3 mixed][64KB day2+day1 mixed]...
+After:   [256MB sorted by ts][256MB sorted by ts]...
+Rows within each file: ts-ordered → delta encoding + predicate pushdown win
+```
+
+**When to use sort-merge:**
+- Most queries filter by timestamp (`WHERE ts BETWEEN X AND Y`)
+- You want better compression (sorted timestamps → delta encoding)
+- You want better min/max pruning (sorted = tighter min/max ranges)
+
+**When bin-pack is enough:**
+- Queries filter by non-sort columns (card_id, merchant)
+- Ingest order is already good (Kafka partitions by card_id)
+- You just need to reduce file count, not improve data layout
+
+**Banking example:** Meridian compacts card_txns nightly with **sort-merge by `ts`** because
+the fraud team's primary query pattern is "transactions in the last N minutes." The sorted
+layout means each file's min/max timestamps are tight, and most files are pruned entirely.
+
+```python
+# PyIceberg: sort-merge compaction (conceptual)
+# In Spark: rewrite_data_files(..., sort_order=["ts ASC"])
+# In PyIceberg: manual overwrite with sorted data
+all_data = table.scan().to_arrow()
+sorted_data = all_data.sort_by("ts")  # sort before overwrite
+table.overwrite(sorted_data)          # atomic swap: old files → new sorted files
+```
+
+### Compaction timing: when NOT to compact
+
+| Situation | Why not | What to do |
+|---|---|---|
+| During quarter-end freeze | Regulatory prohibition on data changes | Compact before freeze; tag the snapshot |
+| While analysts are running long queries | Compaction rewrites files; old snapshots stay valid but new ones appear | Compact during off-hours (02:00–05:00) |
+| Right after a GDPR delete | Delete files are fresh; compaction merges them into rewrites | Wait 24h for delete file accumulation |
+| When storage is tight | Compaction creates new files before old ones are expired | Expire first, then compact |
 
 ## 5. End-to-end example: a miniature medallion pipeline
 
@@ -277,6 +422,76 @@ What just happened:
 | Schema contracts | `get_schema` over Flight SQL wired into consumers' CI |
 | Cost control | compaction + expiry schedules; storage truth in ONE place |
 
+### Data lineage tracking: where did this data come from?
+
+Regulators don't just ask "what does the data say?" — they ask "where did it come from,
+was it transformed correctly, and who accessed it?" Lineage answers the full chain:
+
+```
+SOURCE              BRONZE           SILVER           GOLD              CONSUMER
+─────────────────────────────────────────────────────────────────────────────────
+Oracle OLTP  ──▶  raw_events.csv  ──▶  card_txns.parquet  ──▶  fraud_features  ──▶  Flight SQL
+                   │                    │                     │                     │
+                ingestion job       dedup+validate        aggregate             query
+                2026-08-01 02:00    2026-08-01 02:05      2026-08-01 02:10     2026-08-01 14:30
+                svc_etl             svc_etl               svc_etl               risk_analyst
+```
+
+**What to track at each hop:**
+
+| Hop | Metadata to capture |
+|---|---|
+| Source → Bronze | source system, extraction timestamp, offset/watermark, row count, file hash |
+| Bronze → Silver | input file path, output table, row counts (in/out/rejected), validation results |
+| Silver → Gold | input snapshot, output snapshot, aggregation logic, filter criteria |
+| Gold → Consumer | principal, query, bytes served, timestamp (Flight SQL audit log) |
+
+**Implementation patterns:**
+
+1. **Iceberg table properties** — store lineage metadata in table properties:
+   ```python
+   # tag table with provenance
+   with table.update_properties() as update:
+       update.set("created_by", "svc_etl")
+       update.set("source_system", "oracle_core_banking")
+       update.set("pipeline", "bronze_to_silver_v2.3")
+       update.set("last_refresh", "2026-08-01T02:05:00Z")
+   ```
+
+2. **OpenLineage / Marquez** — industry-standard lineage API:
+   ```python
+   # emit lineage event (conceptual)
+   emit_lineage(
+       job="silver_dedup",
+       inputs=["s3://meridian/bronze/drop_2026-08-01.csv"],
+       outputs=["iceberg://gold.card_txns?snapshot=8412"],
+       run_id="abc-123"
+   )
+   ```
+
+3. **Iceberg snapshot summaries** — every commit carries metadata:
+   ```python
+   # snapshot.summary contains operation stats
+   for snap in table.snapshots():
+       print(snap.summary)
+       # {'added-files-size-bytes': '524288', 'total-records': '19960',
+       #  'operation': 'append', 'appended-rows': '19960'}
+   ```
+
+**Banking scenario:** A regulator asks: "This fraud alert was triggered on August 5th.
+Show me the exact data lineage from source to alert."
+
+The lineage chain:
+1. Source: Oracle OLTP `card_authorizations` table, extracted at 2026-08-05 02:00 UTC
+2. Bronze: `s3://meridian/bronze/auth_2026-08-05.csv` (47,382 rows, SHA-256: `a3f2...`)
+3. Silver: `iceberg://gold.card_txns` snapshot 9104 (47,380 rows after dedup, 2 rejected)
+4. Gold feature: `fraud_features` snapshot 12093 (aggregated per-card velocity)
+5. Alert: Flight SQL query by `risk_analyst` at 14:30 UTC → 3 cards flagged
+
+The auditor verifies: source row count matches Bronze; Silver dedup log shows 2 rejected
+rows with reasons; Gold aggregation is reproducible from Silver snapshot 9104; the alert
+query is in the Flight SQL audit log.
+
 ## 7. Exercises
 
 1. Extend the mini-pipeline: add a `quarantine` zone capturing silver-rejected rows
@@ -290,6 +505,13 @@ What just happened:
    through Flight SQL, ingestion through `do_put`.
 5. Measure end-to-end latency: bronze drop → gold readable via DuckDB. Where does the
    time actually go? (Spoiler: almost never the columnar layers.)
+6. Simulate the small-file problem: write 1000 tiny Parquet files to a directory, then
+   compact them to 10 files. Measure scan planning time before and after using DuckDB's
+   `read_parquet` with `hive_partitioning=true`.
+7. Implement idempotency: write the same Silver transform function, run it twice on
+   the same Bronze input, and prove the Silver row count doesn't double.
+8. Build a lineage chain: Bronze → Silver → Gold with metadata tags at each step.
+   Query the Gold table and trace back to the exact Bronze source file.
 
 ## 8. Cheat sheet
 
@@ -298,10 +520,16 @@ What just happened:
 | Lakehouse | open files + table format + catalog + multi-engine compute |
 | Medallion | bronze(raw) → silver(clean) → gold(curated); each zone has a contract |
 | Ingest patterns | batch drop / micro-batch / log-based CDC (I/U/D events, idempotent, watermark-tracked) |
+| Exactly-once | at-least-once delivery + atomic Iceberg commits + Silver idempotent dedup |
+| Idempotency | dedup by unique key with latest-wins; retries produce same result |
 | Quality gates | schema + expectation + volume checks at zone borders; rejects quarantined with reasons |
 | Iceberg placement | wherever ACID/time-travel matter (usually gold) |
 | Catalog | atomic pointer swap; authZ + discovery; Nessie adds branches/tags |
-| Small-file fix | bin-pack compaction to 128-512MB targets |
+| Small-file cost | 10K files × 5KB footer = 50MB metadata; planning 100× slower than compacted |
+| Compaction: bin-pack | merge small files to target size; no reordering; default choice |
+| Compaction: sort-merge | bin-pack + sort by key; better for time-series range queries |
+| Compaction timing | avoid during quarter-end freezes, active queries, or right after deletes |
+| Lineage | track source → bronze → silver → gold with metadata at each hop |
 | Metadata bloat | expire_snapshots on schedule; keep audit-required tags forever |
 | Orphans | remove_orphan_files weekly with generous safety windows |
 | Governance | catalog authZ + gateway roles + audit logs + snapshot proofs |

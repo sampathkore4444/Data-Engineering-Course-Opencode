@@ -193,6 +193,105 @@ Readers exploit them automatically where supported (DuckDB, Trino, Spark). Stack
 skip-mechanisms deliberately: **partitioning** prunes directories, **min/max stats** prune
 ranges, **bloom filters** prune point lookups.
 
+### Bloom filter trade-offs: when to use them (and when not to)
+
+Bloom filters are not free. Understanding their cost/benefit prevents misuse:
+
+| Factor | Impact |
+|---|---|
+| **Space cost** | ~10 bits per value. A 1-billion-row column with bloom costs ~1.2 GB of metadata per file. At 100K files that adds up. |
+| **False positive rate (fpp)** | fpp=0.01 means 1% of chunks decode unnecessarily. Lower fpp = more space. Typical: 0.01 (1%) or 0.001 (0.1%). |
+| **Write cost** | Bloom filter construction adds ~5–10% write latency. Negligible for batch ETL; noticeable for streaming micro-batches. |
+| **Read benefit** | Eliminates point-lookup I/O for columns where min/max spans the entire value range. Can save 10–100× on high-cardinality equality probes. |
+
+**When to bloom:**
+- High-cardinality columns used in equality lookups: `card_id`, `txn_uuid`, `account_id`
+- Point-in-time lookups: "find this specific transaction"
+- Join keys between large tables
+
+**When NOT to bloom:**
+- Low-cardinality columns (`currency`, `status`, `channel`): min/max stats already prune effectively
+- Range queries (`amount > 1000`): bloom filters only help equality, not ranges
+- Columns you never filter on: pure waste of space
+
+**Banking example:** Meridian enables bloom on `card_id` and `txn_uuid` (point lookups for
+fraud investigation), but NOT on `currency` (only 3 values — min/max handles it) and NOT on
+`amount` (range queries, not equality).
+
+```python
+# selective bloom: only on columns used in equality probes
+pq.write_table(tbl, "txns.parquet",
+    bloom_filter_options={
+        "card_id":  {"enabled": True, "fpp": 0.01},   # high cardinality, point lookups
+        "txn_uuid": {"enabled": True, "fpp": 0.001},  # very high cardinality, fpp matters
+        # "currency": NOT bloomed — 3 values, min/max is enough
+        # "amount":   NOT bloomed — range queries, bloom doesn't help
+    })
+```
+
+### Time zone handling in Parquet timestamps
+
+Banks operate across time zones. Parquet and Arrow distinguish three timestamp representations:
+
+| Type | Parquet physical type | Meaning |
+|---|---|---|
+| `INT64` (logical: `TIMESTAMP_MILLIS`) | milliseconds since epoch | no timezone — **ambiguous** |
+| `INT64` (logical: `TIMESTAMP_MICROS`) | microseconds since epoch | no timezone — **ambiguous** |
+| `INT32/INT64` (logical: `DATE`) | days since epoch | date only, no tz issue |
+
+Parquet stores timestamps as **integers since epoch** (UTC). The timezone annotation is
+metadata only — readers must handle it. The trap:
+
+```
+A card transaction at 2026-07-01 23:30:00 UTC+8 (Tokyo) = 2026-07-01 15:30:00 UTC
+
+If stored WITHOUT timezone info:
+  - A UTC reader sees: 2026-07-01 15:30:00 UTC  ✓ correct
+  - A local-time reader sees: 2026-07-01 23:30:00 (thinks it's UTC) ✗ WRONG date partition!
+
+Result: the same transaction lands in DIFFERENT day partitions depending on the reader.
+```
+
+**Banking rule: always store timestamps in UTC with timezone metadata.**
+
+```python
+import pyarrow as pa
+
+# CORRECT: timezone-aware timestamp
+schema = pa.schema([
+    pa.field("ts", pa.timestamp("us", tz="UTC")),  # unambiguous
+    pa.field("amount", pa.float64()),
+])
+
+# WRONG: ambiguous — readers may interpret as local time
+schema_bad = pa.schema([
+    pa.field("ts", pa.timestamp("us")),  # no tz! dangerous
+])
+```
+
+**Partitioning with time zones:** partition by `DATE(ts)` after converting to UTC,
+not by local date. This ensures a Tokyo transaction and a London transaction
+on the same UTC day land in the same partition:
+
+```python
+import pyarrow.compute as pc
+
+# normalize to UTC before partitioning
+ts_utc = pc.cast(table.column("ts"), pa.timestamp("us", tz="UTC"))
+table = table.set_column(
+    table.schema.get_field_index("ts"), "ts", ts_utc)
+
+# partition by UTC date, not local date
+table = table.append_column("txn_date", pc.cast(ts_utc, pa.date32()))
+pq.write_to_dataset(table, path, partition_cols=["txn_date"])
+```
+
+**Banking scenario:** Meridian processes card transactions from 40 countries. A fraud alert
+for "5 transactions in 10 minutes" must use UTC timestamps — otherwise a card used in
+New York (UTC-5) and then Tokyo (UTC+9) appears to have a 14-hour gap instead of the
+real 2-hour gap. Regulatory quarter-end cutoffs ("all transactions before March 31 23:59:59 UTC")
+are always in UTC.
+
 ---
 
 ## 6. Datasets: many files = one logical dataset
@@ -416,6 +515,11 @@ Iceberg (Lessons 06–07) adds a metadata tree over files to solve all six.
 6. Write a copy of the dataset with `bloom_filter_options={"txn_id": {"enabled": True}}`;
    compare file sizes with and without, and inspect `bloom_filter_length` per chunk.
    Which columns deserve the space — `txn_id` or `currency`? Why?
+7. Write transactions with timestamps in `tz="UTC"` and WITHOUT tz. Read both back and
+   partition by date. Show how the same Tokyo transaction lands in different partitions
+   depending on reader timezone interpretation.
+8. Enable bloom on `card_id` with fpp=0.01 and fpp=0.001. Compare file sizes and measure
+   how many false-positive chunk decodes each produces for 1000 random card lookups.
 
 ## 11. Cheat sheet
 
@@ -425,10 +529,13 @@ Iceberg (Lessons 06–07) adds a metadata tree over files to solve all six.
 | Hierarchy | File → Row Groups → Column Chunks → Pages |
 | Footer | Schema + stats; read last; few KB |
 | Stats | min/max/nulls per chunk → skip whole groups |
-| Bloom filter | per-chunk membership sketch → skip equality probes that min/max can't |
+| Bloom filter | per-chunk membership sketch → skip equality probes that min/max can't; ~10 bits/value |
+| Bloom fpp | false-positive rate: 0.01 = 1% unnecessary decodes; trade space for accuracy |
+| Bloom when | high-cardinality equality lookups (card_id, txn_uuid); NOT ranges or low-cardinality |
 | Nested data | repetition/definition levels shred structs/lists into plain columns |
 | Partitioning | Directory names; prune before I/O |
 | Codecs | SNAPPY/LZ4 hot, ZSTD cold |
+| Timestamps | always UTC with tz metadata; partition by UTC date, not local date |
 | Sweet spot | ~128MB–1GB files, date-like partition cols |
 | Not included | Transactions, updates, evolution ⇒ need Iceberg |
 

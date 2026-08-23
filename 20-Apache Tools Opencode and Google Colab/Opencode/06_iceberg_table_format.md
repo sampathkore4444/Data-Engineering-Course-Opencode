@@ -174,6 +174,168 @@ Lesson 07's "delete + re-append" correction is exactly what `MERGE INTO` perform
 atomically and in one statement. Know both layers: the SQL verb you write, and the
 delete files / rewritten files it produces.
 
+### 3.6 Schema evolution deep dive: field IDs, type widening, nested changes
+
+Iceberg assigns each column a **permanent field ID** at creation time. This is the key
+invariant that makes evolution safe across engines and time:
+
+```
+Snapshot v1:  field_id=1 "txn_id"  (int64)
+              field_id=2 "amount"  (double)
+              field_id=3 "currency" (string)
+
+Snapshot v2:  field_id=1 "txn_id"  (int64)        ← same ID, even if renamed
+              field_id=2 "amount"  (double)
+              field_id=3 "currency" (string)
+              field_id=4 "mcc"     (int32)         ← new column
+
+Snapshot v3:  field_id=1 "txn_id"  (int64)
+              field_id=2 "amount"  (double)
+              field_id=3 "currency" (string)
+              field_id=5 "risk"    (float)          ← field_id=4 was dropped;
+                                                        new field gets next ID
+```
+
+**Safe operations (no data rewrite needed):**
+
+| Operation | What happens | Banking example |
+|---|---|---|
+| **Add column** | New field ID appended; old files return NULL for it | Adding `merchant_city` from upstream upgrade |
+| **Rename column** | Field ID stays; metadata updated | `amount` → `amount_eur` for clarity |
+| **Drop column** | Field ID removed from schema; old files still readable (column invisible) | Dropping `memo` field no one uses |
+| **Reorder columns** | Cosmetic; field IDs unchanged | Move `fraud_flag` to first position |
+
+**Type widening (safe, no rewrite):**
+
+| From | To | Why safe |
+|---|---|---|
+| `int32` | `int64` | wider type can hold all original values |
+| `float32` | `float64` | more precision, no loss |
+| `decimal(10,2)` | `decimal(18,2)` | wider scale, no loss |
+| `string` | `string` | no-op (already variable-length) |
+
+```sql
+-- Iceberg SQL: widen amount from float64 to decimal (precision upgrade)
+ALTER TABLE card_txns ALTER COLUMN amount TYPE decimal(18, 2);
+-- old files still readable; new writes use decimal; readers see cast-on-read
+```
+
+**Unsafe operations (require rewrite or careful handling):**
+
+| Operation | Risk | Mitigation |
+|---|---|---|
+| Narrowing type (`int64` → `int32`) | data loss if values overflow | validate first; Iceberg may reject |
+| Drop + re-add same name | new field gets NEW ID; old data won't populate it | use rename instead |
+| Changing nullability (`nullable` → `required`) | existing NULLs violate constraint | rewrite data first |
+
+**Nested field evolution:** adding/removing fields inside a `STRUCT` works the same way —
+each nested field gets its own permanent ID:
+
+```python
+# original schema with nested struct
+schema_v1 = Schema(
+    NestedField(1, "txn_id", LongType(), required=True),
+    NestedField(2, "card", StructType(
+        NestedField(3, "card_id", LongType()),
+        NestedField(4, "expiry", StringType()),
+    )),
+)
+
+# evolve: add risk_flags inside the card struct
+with table.update_schema() as u:
+    u.add_column("card.risk_flags", StringType())
+# field_id=5 assigned to card.risk_flags — old files return NULL for it
+```
+
+**Banking scenario:** Meridian adds `merchant_city` (from an enriched upstream feed) to the
+card_transactions table. The column doesn't exist in historical Parquet files. Iceberg's
+field-ID mapping ensures: (a) old readers skip the column safely, (b) new readers see
+NULLs for historical rows, (c) no data rewrite is needed. The schema evolution is recorded
+in `metadata.json` diffs that auditors can trace.
+
+### 3.7 PCI-DSS: column-level security and data masking
+
+Banks storing card data must comply with **PCI-DSS** (Payment Card Industry Data Security
+Standard). The key requirements that affect the data lake:
+
+| PCI-DSS Requirement | Lakehouse implementation |
+|---|---|
+| **Mask PAN** (Primary Account Number) | Store only last 4 digits; full PAN tokenized at ingestion |
+| **Restrict access to cardholder data** | Column-level masking via Iceberg views + catalog authZ |
+| **Audit all access** | Flight SQL gateway logs principal + query + bytes served |
+| **Encryption at rest** | S3 SSE / client-side encryption (not covered here) |
+| **Key rotation** | Rotate encryption keys per policy; Parquet footers unaffected |
+
+**Pattern: column-level masking via Iceberg views**
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Iceberg Table: bank.card_txns (stores masked PAN only)        │
+│  Columns: txn_id, card_masked, amount, merchant, mcc, ...     │
+│  card_masked = '****-1234' (last 4 digits only)               │
+└──────────────────────┬─────────────────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────────┐
+        ▼              ▼                  ▼
+   VIEW: fraud_team    VIEW: compliance   VIEW: merchant_analyst
+   (full card_masked)  (full card_masked) (NO card column at all)
+   + risk_score col    + audit_metadata   + merchant stats only
+```
+
+**Why NOT store full PANs in the lake:**
+- Even encrypted PANs expand the attack surface — every replica, backup, and cache
+  must be encrypted and access-logged.
+- Tokenization at ingestion: the OLTP system holds the PAN-to-token mapping;
+  the lake never sees raw card numbers.
+- If a breach occurs, the regulator asks "was the full PAN ever exposed?" — answer:
+  "No, only masked versions existed in the analytical layer."
+
+```python
+# Tokenization at ingestion (simplified)
+def mask_pan(pan: str) -> str:
+    """PCI-DSS: show only last 4 digits."""
+    return "*" * (len(pan) - 4) + pan[-4:]
+
+# in the Bronze ingestion pipeline
+raw_df["card_masked"] = raw_df["card_number"].apply(mask_pan)
+raw_df.drop(columns=["card_number"], inplace=True)  # DROP full PAN immediately
+
+# Silver layer: only masked PANs exist
+silver_table = pa.Table.from_pandas(raw_df)  # card_number is GONE
+```
+
+**Iceberg view-based access control (production pattern):**
+
+```sql
+-- governance catalog creates role-specific views
+CREATE VIEW fraud_team.card_txns AS
+SELECT txn_id, card_masked, amount, merchant, mcc, ts, risk_score
+FROM bank.card_txns;
+
+CREATE VIEW compliance.card_txns AS
+SELECT txn_id, card_masked, amount, mcc, ts, audit_metadata
+FROM bank.card_txns;
+
+CREATE VIEW merchant_analyst.daily_summary AS
+SELECT merchant, mcc, count(*) n, sum(amount) vol
+FROM bank.card_txns
+GROUP BY merchant, mcc;  -- NO card column at all
+```
+
+The catalog (REST/Polaris) enforces which views each principal can access. Flight SQL
+gateways resolve the view at plan time — analysts never see the underlying table path.
+
+**Banking scenario:** A PCI-DSS auditor asks: "Show me exactly which users accessed
+cardholder data in the last 90 days." The Flight SQL gateway audit log answers:
+
+```
+2026-08-01 14:22 | risk_analyst | SELECT ... FROM fraud_team.card_txns | 847 rows | 2.1 KB
+2026-08-01 14:25 | compliance   | SELECT ... FROM compliance.card_txns | 1,204 rows | 3.8 KB
+2026-08-01 15:00 | merchant_analyst | SELECT ... FROM merchant_analyst.daily_summary | 42 rows | 0.4 KB
+```
+
+No raw PAN was ever accessed. The audit trail is complete and reproducible.
+
 
 ## 4. Catalogs: the source of truth for pointers
 
@@ -399,6 +561,14 @@ from *compute engines* is the whole point of the lakehouse.
    or use DuckDB/Spark if available) and observe file counts drop.
 5. Point a second catalog instance at the same SQLite URI and prove readers can list/read
    while a writer commits.
+6. Evolve the schema: add `merchant_city` (StringType) and `risk_flags` (StructType with
+   nested fields `aml: BooleanType`, `kyc: BooleanType`). Append new data with these columns;
+   time-travel to a snapshot before the evolution and verify old data returns NULLs.
+7. Widen `amount` from `DoubleType()` to a higher-precision type. Append data in both types;
+   query all rows and verify no precision loss.
+8. Build a PCI-DSS demo: create the card_txns table with only `card_masked` (last 4 digits).
+   Create two Iceberg views (`fraud_team` sees card_masked + risk; `merchant_analyst` sees
+   only merchant + mcc). Query through DuckDB and prove each view returns different columns.
 
 ## 11. Cheat sheet
 
@@ -410,6 +580,9 @@ from *compute engines* is the whole point of the lakehouse.
 | Time travel | `scan(snapshot_id=...)` / `VERSION AS OF` / `TIMESTAMP AS OF` |
 | Hidden partitioning | transforms (days/bucket/truncate); users filter columns only |
 | Schema evolution | field IDs in metadata; add/rename/drop without rewrite |
+| Type widening | int32→int64, float32→float64 safe; narrowing requires rewrite |
+| Nested evolution | add/remove struct fields via field IDs; old files return NULL |
+| PCI-DSS masking | tokenize PAN at ingestion; store only last-4 in lake; views enforce access |
 | Deletes | equality/positional delete files (MoR) or rewritten files (CoW) |
 | SQL row verbs | UPDATE / DELETE / MERGE INTO = delete files or rewrites underneath |
 | Branches & tags | named snapshot refs: tags immutable (audit pins), branches movable heads; rollback = move main |

@@ -341,19 +341,101 @@ What to internalize:
 4. Every boundary crossing (`.df()`, `.arrow()`, `write_parquet`) is cheap - stay lazy
    until you must materialize.
 
-## 8. When NOT to use DuckDB (honest boundaries)
+## 8. DuckDB concurrency model (production reality)
 
-| Situation | Reach instead for |
+DuckDB's concurrency model is simple but often misunderstood:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  DuckDB .duckdb file                                   │
+│                                                         │
+│  Writers:   ONE at a time (single-writer lock)          │
+│  Readers:   MANY concurrent (MVCC snapshot isolation)   │
+│  Readers see: consistent snapshot from their start time │
+│  Writers see: their own uncommitted changes             │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Key rules:**
+
+| Rule | What it means |
 |---|---|
-| Many concurrent writers / OLTP serving | PostgreSQL / Oracle core banking |
-| Multi-node TB-scale batch | Spark / Trino cluster |
-| High-QPS BI server, hundreds of users | ClickHouse / Snowflake / warehouse |
-| Shared DB written by many teams/apps | client-server warehouse |
+| **Single writer** | Only one process/thread may write to a `.duckdb` file at a time. A second writer blocks or fails. |
+| **Multiple readers** | Any number of read-only queries run concurrently, each seeing a consistent MVCC snapshot. |
+| **Readers don't block writers** | A long analytical query doesn't prevent ETL from appending. |
+| **Writers don't block readers** | New commits are invisible until the reader's snapshot era advances. |
+| **No read replicas** | Unlike PostgreSQL, there's no streaming replication. Each DuckDB instance is independent. |
 
-DuckDB is effectively single-writer per database file. It shines **embedded**: one process,
-heavy reads, SQL over files. That describes most analyst notebooks and most ETL steps.
+**Practical implications for Meridian:**
 
-## 9. Exercises
+```python
+# SCENARIO 1: analyst notebook + ETL — SAFE (one writer, read-only analyst)
+analyst_con = duckdb.connect("meridian.duckdb", config={"access_mode": "read_only"})
+etl_con     = duckdb.connect("meridian.duckdb")  # sole writer
+# analyst queries see consistent pre-ETL snapshot; no conflicts
+
+# SCENARIO 2: two ETL jobs — UNSAFE (both try to write)
+job_a = duckdb.connect("meridian.duckdb")
+job_b = duckdb.connect("meridian.duckdb")  # BLOCKED or ERROR on write
+# FIX: serialize writes (Airflow sensor/lock) or use separate files + ATTACH
+
+# SCENARIO 3: memory budget (shared environment)
+con = duckdb.connect()
+con.execute("SET memory_limit='4GB'")     # cap per-connection memory
+con.execute("SET threads=4")             # limit CPU usage
+```
+
+**When you need real concurrency:**
+- Many concurrent writers → PostgreSQL / Oracle (OLTP)
+- Many concurrent readers at high QPS → ClickHouse / Snowflake / warehouse
+- Multiple teams writing → client-server warehouse with proper locking
+
+DuckDB shines **embedded**: one process, heavy reads, SQL over files. That describes most
+analyst notebooks and most ETL steps.
+
+## 9. DuckDB vs Spark: when to cross the boundary
+
+Both engines read the same Parquet/Iceberg files. The question is when to graduate:
+
+```
+                 DuckDB SWEET SPARK SWEET
+                    │                    │
+   ┌────────────────┼────────────────────┼──────────────────┐
+   │ < 1 machine    │   GRAY ZONE       │ > 1 machine      │
+   │ < 10 min query │  (try DuckDB      │ Multi-TB shuffles │
+   │ Interactive SQL│   first!)         │ Hour-long batch   │
+   │ Ad-hoc analysis│                   │ Feature pipelines │
+   └────────────────┼────────────────────┼──────────────────┘
+                    │                    │
+              DuckDB wins           Spark wins
+```
+
+| Decision factor | DuckDB | Spark |
+|---|---|---|
+| **Data size** | Fits on one machine (RAM + disk) | Multi-TB, doesn't fit in one node |
+| **Query latency** | Sub-second to minutes | Minutes to hours |
+| **Startup cost** | Instant (in-process library) | Seconds to minutes (JVM + cluster) |
+| **Concurrency** | Single writer, many readers | Distributed, many executors |
+| **Cost** | Free, runs on laptop | Cluster cost (EMR/Dataproc/GKE) |
+| **SQL features** | Rich standard SQL + extensions | Spark SQL + DataFrame API |
+| **Streaming** | Micro-batch via Python | Structured Streaming, Flink |
+| **Existing infra** | No cluster needed | Piggybacks on existing Spark cluster |
+
+**The hybrid pattern at Meridian:**
+
+```
+Analyst notebook (DuckDB)          Overnight ETL (Spark)
+  interactive SQL over Parquet       batch features over 2B rows
+  "which cards are suspicious?"     "build all velocity features"
+        │                                   │
+        └──── same Parquet lake ────────────┘
+```
+
+> **Rule of thumb:** Always try DuckDB first. If the query times out or you run out of RAM,
+> graduate to Spark. The SQL ports almost 1:1 — the only additions are window frame syntax
+> and partitioning hints.
+
+## 10. Exercises
 
 1. Rewrite Lesson 04's feature pipeline loop as one DuckDB query; benchmark both on 5M rows.
 2. Build a "card velocity" materialized view partitioned by day, then query only yesterday.
@@ -363,12 +445,20 @@ heavy reads, SQL over files. That describes most analyst notebooks and most ETL 
    and compare operator timings.
 5. Install `httpfs` (`INSTALL httpfs; LOAD httpfs;`) and count rows of any public Parquet
    over HTTPS without downloading it manually.
+6. Open two connections to the same `.duckdb` file: one read-only, one read-write. Run a
+   long query on the read-only connection while the writer appends. Prove MVCC: the reader
+   doesn't see new rows until its snapshot advances.
+7. Set `memory_limit='256MB'` and `threads=1`, then run the velocity query on 5M rows.
+   Observe memory usage via `duckdb.peak_memory_usage_bytes()` and explain the wall-clock
+   difference vs unlimited resources.
 
-## 10. Cheat sheet
+## 11. Cheat sheet
 
 | Task | DuckDB |
 |---|---|
 | Open engine | `duckdb.connect()` / `duckdb.connect("f.duckdb")` |
+| Read-only mode | `duckdb.connect(path, config={"access_mode": "read_only"})` |
+| Memory budget | `SET memory_limit='4GB'` / `SET threads=4` |
 | Query files | `read_parquet(glob, hive_partitioning=true)`, `read_csv_auto` |
 | pandas in/out | replacement scans by name; `.df()` |
 | Arrow in/out | `con.register(name, table)`; `.arrow()` (zero-copy) |
@@ -377,6 +467,8 @@ heavy reads, SQL over files. That describes most analyst notebooks and most ETL 
 | Lazy compose | `con.sql(...).filter(...).aggregate(...).order(...)` |
 | Persist result | `rel.write_parquet(p)` or CREATE TABLE AS |
 | Explain plan | `EXPLAIN [ANALYZE] SELECT ...` |
+| Concurrency | single writer, many readers (MVCC); use read_only for analysts |
+| vs Spark | data fits one machine → DuckDB; multi-TB shuffles → Spark |
 
 **Next:** Lesson 06 - many Parquet files are still not a TABLE. Enter Apache Iceberg:
 transactions, time travel, evolution.
