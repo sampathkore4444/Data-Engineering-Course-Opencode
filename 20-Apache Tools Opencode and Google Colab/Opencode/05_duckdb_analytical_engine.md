@@ -7,6 +7,26 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-what-duckdb-is) | What DuckDB is |
+| [2](#2-architecture-why-it-is-fast) | Architecture: why it is fast |
+| [3](#3-the-sql-superpowers-you-will-actually-use) | The SQL superpowers you will actually use |
+| [4](#4-duckdb---python-ecosystem) | DuckDB ↔ Python ecosystem |
+| [5](#5-persistence-catalogs-and-extensions) | Persistence, catalogs and extensions |
+| [6](#6-banking-scenario-walkthrough) | Banking scenario walkthrough |
+| [7](#7-end-to-end-example-fraud-features-with-one-embedded-engine) | End-to-end example |
+| [7.1](#71-real-world-banking-scenario-fraud-features-python-loop-vs-duckdb-sql) | Real-world: Python loop vs DuckDB SQL |
+| [7.5](#75-proving-it-sql-vs-python-serialization-costs) | SQL vs Python serialization costs |
+| [8](#8-duckdb-concurrency-model-production-reality) | DuckDB concurrency model |
+| [9](#9-duckdb-vs-spark-when-to-cross-the-boundary) | DuckDB vs Spark |
+| [10](#10-exercises) | Exercises |
+| [11](#11-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. What DuckDB is
 
 **DuckDB** is an open-source, **in-process OLAP SQL database**. Think:
@@ -964,7 +984,123 @@ Analyst notebook (DuckDB)          Overnight ETL (Spark)
     result in another DuckDB connection via `ATTACH`, run a `SELECT`, and use `tracemalloc`
     to confirm no memory was allocated during the handoff.
 
-## 11. Cheat sheet
+---
+
+## 11. Interview questions: DuckDB in banking
+
+### Concept 1: DuckDB architecture
+
+**Q1: Why is DuckDB faster than pandas for analytical queries on the same data?**
+
+A: DuckDB uses vectorized execution (processes batches of values per CPU call, enabling SIMD). Pandas uses per-element Python operations (no SIMD, GIL contention). For a GROUP BY on 2M rows: DuckDB ≈ 0.085s (C++ hash aggregation), pandas ≈ 0.52s (Python loops + object overhead). The 6× speedup comes from: no Python objects, SIMD parallelism, and optimized hash tables.
+
+**Q2: Explain DuckDB's concurrency model. Why can't two writers write simultaneously?**
+
+A: DuckDB uses MVCC (Multi-Version Concurrency Control). Writers get exclusive access (single-writer lock). Readers see consistent snapshots from their start time — they don't block writers, and writers don't block readers. Two writers would conflict on the same data files. The solution: serialize writes (Airflow sensor/lock) or use separate databases + ATTACH.
+
+**Q3: How does DuckDB read Parquet files without importing them?**
+
+A: DuckDB has a built-in Parquet reader that scans files directly: `SELECT * FROM read_parquet('file.parquet')`. No import step, no data copying. The reader pushes predicates into the Parquet reader (min/max pruning), reads only needed columns (projection pushdown), and streams batches into DuckDB's vectorized engine. The data stays in Arrow format throughout.
+
+**Q4: What's the difference between `con.sql()` and `con.execute()`?**
+
+A: `con.sql()` returns a lazy Relation (not executed yet). `con.execute()` runs the query and returns a Relation with results. For composition: `con.sql("SELECT ... FROM t").filter("amount > 100")` builds a query plan without executing. For immediate results: `con.sql("...").fetchall()` or `.df()`. Relations are lazy — they execute when consumed.
+
+**Q5: How does DuckDB's morsel-driven parallelism work?**
+
+A: DuckDB splits data into ~128K-row "morsels". Each core grabs a morsel and runs the entire pipeline (scan → filter → aggregate) on it. No coordinator bottleneck — cores work independently. This is cache-friendly (morsel fits in L2 cache) and parallel (no shared state between cores). The result: linear speedup with cores for analytical queries.
+
+### Concept 2: SQL features
+
+**Q1: Explain ASOF JOIN with a banking example. Why is it better than a regular JOIN?**
+
+A: ASOF JOIN finds the most recent right-side row at or before each left-side timestamp. Example: `SELECT t.txn_id, t.ts, b.balance FROM txns t ASOF JOIN balances b ON t.card_id = b.card_id AND b.as_of <= t.ts`. This gives the balance at the moment of each transaction — exact point-in-time state. A regular JOIN would match ALL balances before the transaction, producing duplicate rows.
+
+**Q2: What does QUALIFY do, and why is it useful for fraud detection?**
+
+A: QUALIFY filters window function results without a subquery. Example: `SELECT *, count(*) OVER (PARTITION BY card_id ORDER BY ts RANGE BETWEEN INTERVAL 10 MINUTE PRECEDING AND CURRENT ROW) AS cnt_10m FROM txns QUALIFY cnt_10m >= 5`. This flags cards with 5+ transactions in 10 minutes — the fraud pattern. Without QUALIFY, you'd need a CTE or subquery.
+
+**Q3: How do you query Parquet files directly with DuckDB?**
+
+A: `SELECT * FROM read_parquet('s3://lake/txns/**/*.parquet', hive_partitioning=true)`. DuckDB auto-discovers partition columns, pushes predicates into the Parquet reader, and streams results. No import, no pandas, no copy. For CSV: `read_csv_auto('files.csv')`. For JSON: `read_json('files.json')`. DuckDB reads many formats natively.
+
+**Q4: What's `EXPLAIN ANALYZE` and how do you use it for query optimization?**
+
+A: `EXPLAIN ANALYZE SELECT ...` shows the query plan AND actual execution times. Look for: (1) PushedFilters — are predicates pushed into scans? (2) ReadSchema — are only needed columns read? (3) Operator times — which step is slow? For banking queries: if the scan is fast but the sort is slow, add an index or change the query pattern.
+
+**Q5: How do you persist query results to Parquet with DuckDB?**
+
+A: `COPY (SELECT ...) TO 'output.parquet' (FORMAT PARQUET)`. Or: `con.sql("SELECT ...").write_parquet('output.parquet')`. Or: `CREATE TABLE result AS SELECT ...; result.write_parquet('output.parquet')`. All three write Parquet directly from DuckDB — no pandas intermediate, no DataFrame overhead.
+
+### Concept 3: Arrow interchange
+
+**Q1: How does `con.register("t", arrow_table)` work internally?**
+
+A: DuckDB wraps the Arrow table's buffers via the C Data Interface — no copying. The Arrow table stays in Python memory; DuckDB reads its buffers directly. When DuckDB executes a query, it processes Arrow batches from the registered table. The result returns as Arrow (`.arrow()`) — still zero-copy. This is why the handoff costs ~0.001s.
+
+**Q2: What's the difference between `rel.arrow()` and `rel.df()`?**
+
+A: `rel.arrow()` returns an Arrow table (zero-copy from DuckDB's internal buffers). `rel.df()` returns a pandas DataFrame (copies data from DuckDB to pandas). Use `.arrow()` for downstream Arrow/Parquet operations. Use `.df()` for pandas analysis. The rule: stay in Arrow as long as possible, cross to pandas only at the edges.
+
+**Q3: A DuckDB query returns 10M rows. How do you avoid materializing the full result?**
+
+A: Stream batches: `reader = rel.execute().to_arrow_reader(4096); for batch in reader: process(batch)`. This keeps memory constant (4096 rows at a time). Or use `rel.write_parquet('output.parquet')` to write directly without materializing. The key: DuckDB streams Arrow batches — don't collect them all.
+
+**Q4: How do you query a pandas DataFrame with DuckDB?**
+
+A: DuckDB uses replacement scans: `con.sql("SELECT * FROM my_df WHERE amount > 100")`. DuckDB detects `my_df` in the Python namespace and reads it as an Arrow table. No registration needed. For explicit registration: `con.register("my_df", df)`. Both approaches avoid copying — DuckDB reads pandas buffers directly.
+
+**Q5: Why is DuckDB's Arrow output faster than pandas' `to_parquet()`?**
+
+A: DuckDB writes Parquet directly from its internal buffers: `COPY (SELECT ...) TO 'out.parquet'`. No pandas intermediate, no DataFrame construction, no numpy conversion. Pandas `to_parquet()` goes: DataFrame → numpy arrays → Parquet encoding. DuckDB skips the DataFrame step, saving ~0.3s for 2M rows.
+
+### Concept 4: DuckDB vs Spark
+
+**Q1: When should you use DuckDB instead of Spark?**
+
+A: DuckDB when: (1) data fits on one machine (< 100GB RAM), (2) query < 5 minutes, (3) interactive/ad-hoc analysis, (4) no cluster available. Spark when: (1) data exceeds one machine's RAM, (2) multi-hour batch ETL, (3) existing Spark cluster, (4) distributed window functions over billions of rows. Rule of thumb: try DuckDB first, graduate to Spark when it hits limits.
+
+**Q2: A bank has 500 GB of Parquet on S3. Can DuckDB query it?**
+
+A: Yes, via httpfs: `INSTALL httpfs; LOAD httpfs; SELECT count(*) FROM 's3://lake/txns/**/*.parquet'`. DuckDB fetches only the Parquet pages it needs (predicate pushdown). For 500 GB, a filtered query might read 5 GB — feasible on a 16 GB machine. But a full scan would be slow — that's where Spark's distribution helps.
+
+**Q3: Why is DuckDB's startup time instant while Spark takes seconds?**
+
+A: DuckDB is an in-process library — no JVM, no class loading, no cluster provisioning. `duckdb.connect()` allocates memory and returns. Spark requires: JVM startup (~2s), class loading (~1s), cluster connection (~1s), DAG construction (~0.5s). For interactive analysis: DuckDB's instant startup is a massive UX advantage.
+
+**Q4: How do you port a DuckDB query to Spark SQL?**
+
+A: 90% identical. Differences: (1) INTERVAL syntax: DuckDB `INTERVAL '10' MINUTE` vs Spark `INTERVAL 10 MINUTES`, (2) Window frames: DuckDB `RANGE BETWEEN INTERVAL ... AND CURRENT ROW` vs Spark `rangeBetween(-600, 0)`, (3) GROUP BY ALL: supported in both, (4) QUALIFY: supported in both. The core SQL (SELECT, WHERE, GROUP BY, HAVING) is identical.
+
+**Q5: What's the hybrid pattern for using both DuckDB and Spark?**
+
+A: DuckDB for interactive analysis (analyst notebooks, ad-hoc queries). Spark for distributed batch (overnight ETL, feature engineering over 2B rows). Both read the same Parquet/Iceberg files — the lake is the contract. DuckDB writes intermediate results to Parquet; Spark reads them for heavy transforms. The key: same storage, different compute.
+
+### Concept 5: Production patterns
+
+**Q1: How do you handle DuckDB's single-writer limitation in production?**
+
+A: Options: (1) Serialize writes with Airflow sensors/locks, (2) Use separate DuckDB files + ATTACH for cross-database queries, (3) Use Iceberg tables (multiple writers via optimistic concurrency), (4) Use a client-server database (PostgreSQL) for writes, DuckDB for reads. The key: DuckDB excels at reads — writes should be serialized or offloaded.
+
+**Q2: A DuckDB query uses 8 GB RAM. How do you limit it?**
+
+A: `SET memory_limit='4GB'; SET threads=4;`. DuckDB spills to disk when memory is exceeded — queries still work, just slower. For production: set limits per-connection to prevent OOM. Monitor with `duckdb.peak_memory_usage_bytes()`. The trade-off: lower memory = more disk I/O = slower queries.
+
+**Q3: How do you deploy DuckDB in a production pipeline?**
+
+A: Options: (1) Embedded in Python script (Airflow operator), (2) DuckDB as a library in a microservice, (3) DuckDB-wasm in browser for interactive dashboards, (4) MotherDuck (managed DuckDB cloud). For banking: embedded in Airflow tasks, reading Parquet from S3, writing results to Iceberg. No server to manage.
+
+**Q4: How do you monitor DuckDB query performance in production?**
+
+A: Use `EXPLAIN ANALYZE` for query plans. Log: execution time, memory usage (`duckdb.peak_memory_usage_bytes()`), rows scanned vs returned. For production: wrap queries with timing decorators, log to monitoring system. Alert on: queries > 5 minutes, memory > 80% limit, full table scans.
+
+**Q5: A bank's DuckDB pipeline processes 1M rows in 0.1s. How do you scale to 100M rows?**
+
+A: DuckDB scales linearly with data size for most queries (vectorized, morsel-driven). 1M rows = 0.1s → 100M rows ≈ 10s. If it's slower: check for: (1) data skew (one card has 50% of rows), (2) window functions (expensive per-partition), (3) memory spill (set higher memory_limit). For truly large data (> 1TB): graduate to Spark.
+
+---
+
+## 12. Cheat sheet
 
 | Task | DuckDB |
 |---|---|

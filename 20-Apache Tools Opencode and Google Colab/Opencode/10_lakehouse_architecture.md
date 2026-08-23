@@ -8,6 +8,21 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-concept-what-lakehouse-actually-means) | Concept: what "lakehouse" actually means |
+| [2](#2-medallion-architecture-zones-with-contracts) | Medallion architecture: zones with contracts |
+| [3](#3-the-catalog-one-map-to-rule-them-all) | The catalog: one map to rule them all |
+| [4](#4-small-file-disease--the-maintenance-cadence) | Small-file disease & the maintenance cadence |
+| [5](#5-end-to-end-example-a-miniature-medallion-pipeline) | End-to-end example |
+| [6](#6-governance--security-checklist) | Governance & security checklist |
+| [7](#7-exercises) | Exercises |
+| [8](#8-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. Concept: what "lakehouse" actually means
 
 Three eras of analytics platforms:
@@ -516,7 +531,123 @@ query is in the Flight SQL audit log.
    `read_*()`, `write_*()` call in the pipeline. Which boundary dominates? Replace it
    with an Arrow kernel and measure the improvement.
 
-## 8. Cheat sheet
+---
+
+## 8. Interview questions: lakehouse architecture
+
+### Concept 1: Medallion architecture
+
+**Q1: What is the medallion architecture, and why do banks use it?**
+
+A: Three zones: Bronze (raw, immutable), Silver (validated, deduplicated), Gold (aggregated, curated). Each zone has a contract: Bronze = source of truth, Silver = clean data, Gold = business-ready. Banks use it for: (1) data quality gates (reject bad data at Silver), (2) separation of concerns (ETL vs analytics), (3) audit trail (Bronze preserves raw data), (4) performance (Gold is pre-aggregated for dashboards).
+
+**Q2: What's the difference between Bronze and Silver?**
+
+A: Bronze: raw data as-is from source (no transforms, no dedup). Silver: validated, deduplicated, schema-enforced. Example: Bronze has duplicate card authorizations (network retry), Silver deduplicates by txn_id. Silver rejects bad rows to quarantine. The key: Bronze is immutable (never modified), Silver is the clean version.
+
+**Q3: How do you enforce data quality at the Silver zone?**
+
+A: Schema checks (column types, nullability), expectation checks (amount > 0, card_id in valid range), volume checks (row count within 20% of yesterday). Bad rows go to quarantine with reasons. Good rows pass to Silver. The key: quarantine, don't reject — bad data might be fixable later.
+
+**Q4: Why is Bronze immutable?**
+
+A: Bronze is the source of truth. If Silver transforms are wrong, you can reprocess from Bronze. If Bronze is modified, you lose the ability to reproduce historical states. Immutability enables: reprocessing, debugging, regulatory compliance (prove what the source looked like). The key: Bronze is the audit trail.
+
+**Q5: How do you handle schema changes across medallion zones?**
+
+A: Iceberg schema evolution: add columns in Bronze → propagate to Silver → propagate to Gold. Each zone can have its own schema (Bronze has all columns, Silver drops PII, Gold aggregates). The key: Iceberg field IDs make schema evolution safe across zones.
+
+### Concept 2: Catalogs and governance
+
+**Q1: What's the role of a catalog in a lakehouse?**
+
+A: The catalog maps table names to metadata locations (e.g., `bank.card_txns` → `s3://warehouse/bank/card_txns/metadata/v53.metadata.json`). It provides: (1) discovery (list tables), (2) access control (who can read/write), (3) metadata management (schemas, partitions), (4) lineage tracking (which tables depend on which). The catalog is the single point of truth.
+
+**Q2: What's the difference between a catalog and a table format?**
+
+A: A table format (Iceberg) defines the metadata structure (snapshots, manifests). A catalog maps table names to metadata locations. You need both: catalog for discovery/access control, table format for ACID/time travel. The catalog is the entry point; the table format is the data organization.
+
+**Q3: How do you implement row-level security in a lakehouse?**
+
+A: Options: (1) Catalog-level policies (REST catalog enforces row filters), (2) View-based security (create views with WHERE clauses), (3) Column masking (Iceberg views hide PII columns). The key: security belongs in the catalog/governance layer, not in the table format. Iceberg provides the mechanism (views), the catalog enforces the policy.
+
+**Q4: How do you track data lineage in a lakehouse?**
+
+A: Track at each hop: (1) Bronze → Silver: log source file, row count, rejected rows, (2) Silver → Gold: log snapshot IDs, aggregation logic, (3) Gold → dashboard: log query, bytes served. Store lineage in metadata (Iceberg snapshot summaries) or external system (OpenLineage). The key: lineage is a chain of snapshot IDs + operation logs.
+
+**Q5: How do you handle GDPR in a lakehouse?**
+
+A: (1) Delete from active tables (Silver, Gold) via Iceberg DELETE. (2) Archive pre-deletion data to compliance table (regulatory hold). (3) Tag pre-deletion snapshot (never expires). (4) Compact affected partitions. (5) Log the operation. The key: GDPR says erase, regulations say retain — archive to a restricted table.
+
+### Concept 3: Small-file problem and maintenance
+
+**Q1: What's the small-file problem, and why does it happen?**
+
+A: Streaming ingest creates many small files (e.g., 11,000 files for 3 days). Each file adds metadata overhead (manifest entries, min/max stats). Planning scans thousands of manifests → slow. Data scanning does many small I/O operations → slow. The solution: compaction (merge small files into larger ones).
+
+**Q2: How does compaction solve the small-file problem?**
+
+A: `rewrite_data_files` merges small files into target-size files (e.g., 512MB). Result: fewer files → less metadata overhead → faster planning. Fewer I/O operations → faster scanning. The key: compaction is metadata-only (Iceberg tracks new files, old files become orphans). Nightly compaction is standard.
+
+**Q3: What's the difference between compaction and vacuuming?**
+
+A: Compaction: merge small files into larger ones (Iceberg `rewrite_data_files`). Vacuuming: remove orphan files not referenced by any snapshot (Iceberg `remove_orphan_files`). Compaction improves performance; vacuuming reclaims storage. Do both: nightly compaction + weekly vacuuming.
+
+**Q4: How do you handle small files in the Bronze zone?**
+
+A: Bronze should have fewer files (batch ingestion, not streaming). If Bronze has small files: compact during off-hours. Silver/Gold: compact nightly. The key: Bronze is source-of-truth, so compaction is optional (raw data is raw). Silver/Gold need compaction for performance.
+
+**Q5: What's the impact of not compacting?**
+
+A: Performance degrades: (1) Planning takes minutes (scanning thousands of manifests), (2) Scanning takes longer (many small I/O operations), (3) Metadata bloat (thousands of manifest entries). The table still works, but queries slow down. Monitor: file count, manifest count, query latency. Alert when thresholds are exceeded.
+
+### Concept 4: Exactly-once and idempotency
+
+**Q1: What's the difference between exactly-once and at-least-once delivery?**
+
+A: At-least-once: messages may be delivered multiple times (network retries). Exactly-once: each message is processed once. In a lakehouse: at-least-once delivery + idempotent writes = effectively exactly-once. The key: you can't guarantee exactly-once delivery (network is unreliable), but you can guarantee idempotent processing.
+
+**Q2: How do you achieve idempotency in a lakehouse pipeline?**
+
+A: Dedup by unique key with latest-wins: `MERGE INTO silver USING bronze ON bronze.txn_id = silver.txn_id WHEN MATCHED THEN UPDATE SET ... WHEN NOT MATCHED THEN INSERT ...`. Running the same transform twice produces the same result. The key: idempotency is a property of the transform, not the delivery.
+
+**Q3: How do you handle failed writes in a lakehouse?**
+
+A: Iceberg's atomic commits: if a write fails, the table is unchanged (no partial state). The failed write's data files become orphans (cleaned up by `remove_orphan_files`). The key: Iceberg protects against partial writes — the table is always consistent.
+
+**Q4: How do you handle duplicate data in the Bronze zone?**
+
+A: Bronze is raw — duplicates are expected (network retries, re-ingestion). Silver deduplicates: `MERGE INTO silver USING bronze ON bronze.txn_id = silver.txn_id ...`. The key: dedup happens at Silver, not Bronze. Bronze preserves the raw truth.
+
+**Q5: How do you handle late-arriving data in a lakehouse?**
+
+A: Options: (1) Append to Bronze (late data is just another file), (2) Reprocess Silver/Gold with late data included, (3) Use watermarking (ignore data older than threshold). The key: Bronze is append-only — late data is never rejected, just appended. Silver/Gold may need reprocessing.
+
+### Concept 5: End-to-end pipeline
+
+**Q1: What's the typical latency from Bronze drop to Gold readable?**
+
+A: Bronze drop: seconds (file upload). Silver transform: seconds to minutes (depending on data volume). Gold aggregation: seconds (pre-aggregated). Total: minutes, not hours. The key: columnar processing is fast — the bottleneck is usually I/O (S3 latency), not compute.
+
+**Q2: How do you monitor a lakehouse pipeline?**
+
+A: Track: (1) Bronze file count and size (ingest rate), (2) Silver row count and rejection rate (data quality), (3) Gold query latency (performance), (4) Compaction file count (maintenance health). Alert on: rejection rate > 5%, query latency > 2× baseline, file count > threshold. The key: metrics at each zone.
+
+**Q3: How do you handle pipeline failures?**
+
+A: (1) Retries with exponential backoff (transient failures), (2) Dead letter queue (persistent failures), (3) Alerting (immediate notification), (4) Manual intervention (complex failures). The key: Iceberg's atomic commits ensure the table is always consistent — failures don't corrupt data.
+
+**Q4: How do you test a lakehouse pipeline?**
+
+A: (1) Unit tests: transform functions on small datasets, (2) Integration tests: end-to-end pipeline on test data, (3) Data quality tests: expectations on Silver/Gold, (4) Performance tests: latency under load. The key: test the transforms, not the infrastructure (Iceberg handles ACID).
+
+**Q5: How do you deploy a lakehouse pipeline to production?**
+
+A: (1) Airflow/Dagster orchestrates the pipeline, (2) Each step is a task (Bronze drop, Silver transform, Gold aggregate), (3) Dependencies: Silver depends on Bronze, Gold depends on Silver, (4) Monitoring: task duration, row counts, error rates. The key: orchestration is separate from processing — Iceberg handles the data layer.
+
+---
+
+## 9. Cheat sheet
 
 | Concept | Fact |
 |---|---|

@@ -7,6 +7,22 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-how-data-physically-lands-on-disk) | How data physically lands on disk |
+| [2](#2-row-oriented-storage-the-oltp-classic) | Row-oriented storage (the OLTP classic) |
+| [3](#3-column-oriented-storage-the-olap-workhorse) | Column-oriented storage (the OLAP workhorse) |
+| [4](#4-column-encodings--the-real-magic) | Column encodings — the real magic |
+| [5](#5-architecture-where-each-storage-style-lives-in-a-bank) | Architecture: where each storage style lives in a bank |
+| [6](#6-banking-scenario-walkthrough) | Banking scenario walkthrough |
+| [7](#7-end-to-end-example-feel-the-difference-in-python) | End-to-end example: feel the difference in Python |
+| [8](#8-exercises-do-these) | Exercises |
+| [9](#9-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. How data physically lands on disk
 
 Disks (and SSDs) do not understand rows or columns. They understand **fixed-size blocks/pages**
@@ -387,7 +403,77 @@ than this synthetic data, so real ratios of 10–30× are common.
 
 ---
 
-## 9. Cheat sheet
+## 9. Interview questions: columnar storage in banking
+
+### Concept 1: Why columnar storage?
+
+**Q1: Why does a fraud query over 2 billion rows finish in seconds with columnar storage but takes minutes with row storage?**
+
+A: Columnar storage reads only the columns needed (projection pushdown). A fraud query like "average amount per merchant category" reads only `amount` and `mcc` — 2 columns out of 60. Row storage reads all 60 columns for every row. The I/O reduction is 30×, which directly translates to query speed.
+
+**Q2: A banking analyst says "our OLTP database is fast, why can't we use it for analytics?" How do you explain the difference?**
+
+A: OLTP databases are optimized for point lookups (row storage, indexes, locks). Analytics require scanning millions of rows across a few columns — columnar storage reads only what's needed, uses vectorized SIMD instructions, and avoids loading irrelevant data. The access patterns are fundamentally different.
+
+**Q3: How does dictionary encoding help with the `currency` column that has only 3 values (EUR, USD, GBP) across 2 billion rows?**
+
+A: Dictionary encoding stores a small dictionary (3 entries) and replaces each occurrence with a 1-byte index. Instead of storing "EUR" (3 bytes) 700 million times, you store index 0 (1 byte) 700 million times. The data footprint drops by 66%, and filtering becomes a simple integer comparison.
+
+**Q4: What happens to columnar performance when a query needs ALL columns (e.g., `SELECT *`)?**
+
+A: The columnar advantage shrinks because you must read all columns anyway. However, columnar still helps because: (1) compression is better per-column, (2) vectorized processing still works, and (3) you can skip columns added later. The crossover point is around 40-60% of columns — beyond that, row storage may be competitive.
+
+**Q5: In a banking data lake with 500 columns, an analyst queries 5 columns. What's the theoretical I/O reduction?**
+
+A: 500/5 = 100× reduction in I/O. In practice, you get 30-80× because of metadata overhead, compression differences, and page alignment. But the key insight is that columnar storage scales with query selectivity — the fewer columns you read, the faster it gets.
+
+### Concept 2: Encodings and compression
+
+**Q1: A transaction table has a `timestamp` column sorted in ascending order. Which encoding exploits this, and why?**
+
+A: Delta encoding. Instead of storing full timestamps (8 bytes each), you store the difference between consecutive values (typically small integers). If transactions are 1 second apart, you store 1 (4 bytes) instead of 1690000000 (8 bytes). Combined with run-length encoding on the deltas, this can compress timestamps by 10×.
+
+**Q2: Why is run-length encoding ineffective on a `transaction_uuid` column but highly effective on a `status` column?**
+
+A: UUIDs are unique — no consecutive repeats, so RLE provides no benefit. The `status` column has low cardinality (e.g., 'completed', 'pending', 'failed') with long runs of the same value. RLE stores (value, count) pairs, which is extremely compact for repeated values.
+
+**Q3: How does compression interact with predicate pushdown in a columnar format?**
+
+A: Columnar statistics (min/max per page) allow skipping entire pages without decompressing. If a page's max amount is 500 and you filter `amount > 1000`, the page is skipped entirely. This means compression doesn't hurt filter performance — you skip compressed pages, not decompress-and-skip.
+
+**Q4: A bank stores 100 TB of transaction data. After columnar encoding and compression, what size reduction is realistic?**
+
+A: Typical reduction is 5-10× for numeric data (delta + RLE + compression) and 3-5× for strings (dictionary + compression). Realistic estimate: 100 TB → 10-20 TB. The exact ratio depends on data cardinality, sort order, and compression algorithm (ZSTD is typically best).
+
+**Q5: Why does sorting data by `card_id` before writing improve compression?**
+
+A: Sorting groups similar values together, which improves delta encoding (small differences between consecutive values) and run-length encoding (longer runs of identical values). For a `card_id` column, sorting means all transactions for card 300001 are adjacent, making the card_id deltas small and compressible.
+
+### Concept 3: OLTP vs OLAP
+
+**Q1: A bank's core banking system uses PostgreSQL (row store). Why can't they just add columnar indexes to make analytics fast?**
+
+A: Columnar indexes help but don't solve the fundamental problem: row stores still read entire rows from disk, and index maintenance overhead hurts write performance. Columnar storage is purpose-built for analytics: no per-row overhead, vectorized processing, and page-level skipping. The architectural difference matters more than indexes.
+
+**Q2: How does a bank typically split workloads between OLTP and OLAP systems?**
+
+A: OLTP (PostgreSQL/Oracle) handles real-time transactions: account balances, payment processing, card authorizations. OLAP (columnar lake/warehouse) handles analytics: fraud detection, regulatory reporting, customer analytics. Data flows from OLTP → ETL → OLAP via CDC or batch extracts. The two systems serve different access patterns.
+
+**Q3: What's the "embarrassingly parallel" property of columnar scans, and why does it matter for banking analytics?**
+
+A: Columnar scans are embarrassingly parallel because each column can be processed independently — no dependencies between values. For a 2-billion-row scan, you can split across 100 cores, each processing 20 million values with SIMD instructions. This is why analytical queries scale linearly with cores, unlike row-oriented operations.
+
+**Q4: A real-time fraud system needs both point lookups (is this card blocked?) AND analytics (what's the average transaction amount?). How do you architect this?**
+
+A: Use a lambda or kappa architecture: OLTP store (Redis/PostgreSQL) for real-time point lookups, columnar store (Iceberg/DuckDB) for analytics. CDC streams from OLTP to the columnar store. The fraud system queries both: Redis for instant card checks, columnar for pattern analysis. This gives you the best of both worlds.
+
+**Q5: Why do modern lakehouses (Databricks, Snowflake) blur the OLTP/OLAP boundary?**
+
+A: Lakehouses add ACID transactions to columnar storage via table formats (Iceberg/Delta). This allows UPDATE/DELETE operations that were previously OLTP-only. The result: a single system handles both analytics and light transactional workloads. The trade-off: write performance is lower than true OLTP, but the operational simplicity of one system often wins.
+
+---
+
+## 10. Cheat sheet
 
 | Term | Meaning |
 |---|---|

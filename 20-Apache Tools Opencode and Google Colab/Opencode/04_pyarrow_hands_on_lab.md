@@ -7,6 +7,27 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-concept-recap-and-mental-model) | Concept recap and mental model |
+| [2](#2-types--schemas-get-them-right-first) | Types & schemas |
+| [3](#3-construction-patterns) | Construction patterns |
+| [4](#4-slicing-filtering-taking---all-vectorized) | Slicing, filtering, taking |
+| [5](#5-compute-kernels-your-new-standard-library) | Compute kernels |
+| [6](#6-tablegroupby-joins-and-set-ops) | TableGroupBy, joins and set ops |
+| [7](#7-the-dataset-api-lazy-scans-over-many-files) | The Dataset API |
+| [8](#8-pandas-interop---the-two-dtypes-worlds) | pandas interop |
+| [8.5](#85-serialization-audit-where-the-feature-pipeline-converts-formats) | Serialization audit |
+| [9](#9-memory-management--gotchas) | Memory management & gotchas |
+| [10](#10-banking-scenario-walkthrough-the-nightly-feature-pipeline) | Banking scenario walkthrough |
+| [10.5](#105-proving-it-serialization-benchmarks-on-the-feature-pipeline) | Serialization benchmarks |
+| [11](#11-exercises) | Exercises |
+| [12](#12-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. Concept recap and mental model
 
 From Lesson 03 you know Arrow's memory model. PyArrow is its Python face:
@@ -641,7 +662,123 @@ Arrow compute kernels.
    table in DuckDB via `con.register()`, run a `SELECT`, and use `tracemalloc` to confirm
    no memory was allocated during the handoff.
 
-## 12. Cheat sheet
+---
+
+## 12. Interview questions: PyArrow in practice
+
+### Concept 1: Construction and schemas
+
+**Q1: Why should you never build large Arrow arrays from Python lists?**
+
+A: Python lists store PyObjects (49 bytes overhead per element). Building `pa.array([1,2,3,...])` from a 1M-element list creates 1M Python objects, then copies values into Arrow buffers. Instead: `pa.array(numpy_array)` wraps the numpy buffer directly (zero-copy). Or use `pa.array(range(N), type=pa.int64())` which builds directly in Arrow buffers.
+
+**Q2: A banking table has 60 columns. How do you define a schema that catches type errors early?**
+
+A: Use `pa.schema([pa.field("txn_id", pa.int64(), nullable=False), ...])` with explicit types and nullability. When creating tables: `pa.table(data, schema=schema)` validates types at creation time. Without a schema, Arrow infers types (may guess wrong) and allows nulls everywhere. Explicit schemas prevent downstream errors.
+
+**Q3: What's the difference between `pa.Table.from_pandas()` with and without `preserve_index=False`?**
+
+A: With `preserve_index=True` (default), the pandas index becomes an Arrow column. With `False`, it's dropped. For data pipelines: always use `preserve_index=False` — the index is usually meaningless in analytical data. This prevents unexpected columns and keeps schemas clean.
+
+**Q4: How do you handle pandas DataFrame with mixed dtypes (int64, float64, object) in Arrow?**
+
+A: Arrow handles mixed dtypes natively: int64 → `pa.int64()`, float64 → `pa.float64()`, object (strings) → `pa.string()`. The conversion: `pa.Table.from_pandas(df, schema=arrow_schema)`. For object columns with mixed types, Arrow may infer `pa.string()` or `pa.large_string()`. Always provide an explicit schema to avoid surprises.
+
+**Q5: Why does `pa.Table.from_pylist()` with 1M dicts is slow, while `pa.Table.from_pandas()` is fast?**
+
+A: `from_pylist()` iterates Python dicts (slow, per-row overhead). `from_pandas()` extracts numpy arrays from DataFrame columns (fast, vectorized). For large data: always go via pandas/numpy, not Python dicts. The rule: never build large Arrow data from Python objects — use numpy arrays or pandas DataFrames as intermediaries.
+
+### Concept 2: Compute kernels
+
+**Q1: How do you compute a rolling 10-minute velocity feature in PyArrow without pandas?**
+
+A: Use DuckDB SQL over Arrow tables: `con.register("txns", table); con.sql("SELECT card_id, count(*) OVER (PARTITION BY card_id ORDER BY ts RANGE BETWEEN INTERVAL 10 MINUTE PRECEDING AND CURRENT ROW) FROM txns")`. Arrow alone doesn't have window functions — DuckDB provides SQL over Arrow buffers. The result returns as Arrow (zero-copy).
+
+**Q2: A fraud query needs `GROUP BY card_id` on 10M rows. How does `table.group_by()` compare to pandas?**
+
+A: `table.group_by().aggregate()` runs in C++ (vectorized, multithreaded). Pandas `groupby()` runs in Python (single-threaded, object overhead). For 10M rows: Arrow ≈ 0.08s, pandas ≈ 0.5s. The key difference: Arrow uses hash aggregation on Arrow buffers; pandas creates Python groups with per-group overhead.
+
+**Q3: How do you filter rows where `amount > 100 AND country = 'US'` using Arrow compute?**
+
+A: `mask = pc.and_(pc.greater(table.column("amount"), 100), pc.equal(table.column("country"), "US")); filtered = table.filter(mask)`. Both predicates produce boolean bitmaps; `pc.and_()` combines them (bitwise SIMD); `table.filter()` gathers matching rows. All operations are vectorized, null-aware, and parallel.
+
+**Q4: What's the difference between `pc.filter()` and `table.filter()`?**
+
+A: `pc.filter(array, mask)` filters a single array. `table.filter(mask)` filters all columns using the same mask. For tables: `table.filter(mask)` is equivalent to `pa.table({col: pc.filter(table.column(col), mask) for col in table.column_names})` but more efficient (one call, optimized path).
+
+**Q5: How do you handle null values in Arrow compute kernels?**
+
+A: Kernels are null-aware by default: `pc.sum()` skips nulls, `pc.mean()` computes mean of non-null values, `pc.filter()` preserves null positions. For null propagation: `pc.add(1, null)` returns null. For null counting: `array.null_count` or `pc.count(array)`. Nulls are first-class citizens in Arrow — no special handling needed.
+
+### Concept 3: Dataset API
+
+**Q1: Why use `ds.dataset()` instead of `pq.read_table()` for multiple Parquet files?**
+
+A: `ds.dataset()` is lazy — it plans the query without reading data. `pq.read_table()` reads everything immediately. For 1000 files: `ds.dataset()` lists files and plans in milliseconds; `pq.read_table()` reads all data (minutes). The Dataset API enables predicate pushdown across files, parallel reading, and streaming.
+
+**Q2: How does hive partitioning work with `ds.dataset()`?**
+
+A: `ds.dataset(path, partitioning="hive")` infers partition columns from directory names (e.g., `date=2026-07-15/`). When you filter `ds.field("date") == "2026-07-15"`, only that directory is scanned. This is partition pruning — the Dataset API automatically maps column predicates to directory listings.
+
+**Q3: What's the difference between `scanner().to_table()` and `scanner().to_batches()`?**
+
+A: `to_table()` materializes the entire result into memory (fast for small results). `to_batches()` returns a generator of RecordBatches (constant memory for large results). For 100M rows: `to_table()` needs 100M × row_size RAM; `to_batches()` needs only batch_size × row_size RAM. Use `to_batches()` for streaming, `to_table()` for small results.
+
+**Q4: How do you write a partitioned Parquet dataset with `ds.write_dataset()`?**
+
+A: `ds.write_dataset(table, base_dir="output", format="parquet", partitioning=ds.partitioning(schema))`. This writes one file per partition value (e.g., `date=2026-07-15/part-0.parquet`). Partitioning columns are NOT stored in the Parquet files — they're encoded in directory names. This enables partition pruning at read time.
+
+**Q5: A bank has 10 TB of Parquet files. How do you query them with DuckDB via PyArrow?**
+
+A: `con = duckdb.connect(); con.register("txns", ds.dataset("s3://lake/txns", format="parquet", partitioning="hive").to_table())`. DuckDB reads the Arrow table directly (zero-copy). Or: `con.sql("SELECT * FROM read_parquet('s3://lake/txns/**/*.parquet', hive_partitioning=true)")`. Both avoid materializing the full 10 TB in memory.
+
+### Concept 4: Memory management
+
+**Q1: How do you check how much memory an Arrow table uses?**
+
+A: `table.nbytes` returns total bytes across all columns. `pa.default_memory_pool().bytes_allocated()` returns total Arrow memory allocated. For per-column: `table.column("amount").nbytes`. This helps identify memory-hungry columns (strings are usually largest due to data buffers).
+
+**Q2: What's the difference between `combine_chunks()` and `chunked_array`?**
+
+A: ChunkedArray stores data as multiple chunks (list of arrays). `combine_chunks()` merges chunks into one array (copy). Use ChunkedArray for incremental building (append chunks). Use `combine_chunks()` when you need a single contiguous array (e.g., for `to_numpy(zero_copy_only=True)` or IPC write). The trade-off: memory vs performance.
+
+**Q3: A slice of an Arrow array keeps the parent buffer alive. How do you release it?**
+
+A: Slices are views — they reference parent buffers. To release: either `pc.filter()` or `pc.take()` to create a new array (copies surviving values), or `combine_chunks()` for ChunkedArrays. If you keep a small slice of a large array, the entire parent stays in memory. Rule: after heavy filtering, materialize the result.
+
+**Q4: How do you track Arrow memory allocation in a production pipeline?**
+
+A: Use `pa.set_memory_pool("tracking")` to enable allocation tracking. Then: `pool = pa.default_memory_pool(); print(pool.bytes_allocated())`. For production: wrap pipeline stages with memory snapshots, log allocation deltas, and alert on excessive allocation. Arrow's pool-based allocation makes this straightforward.
+
+**Q5: A pipeline processes 1M rows but uses 10 GB RAM. How do you diagnose the issue?**
+
+A: Check: (1) `table.nbytes` — is the table larger than expected? (2) `pc.filter()`/`pc.take()` results — do they keep parent buffers alive? (3) ChunkedArray — are chunks accumulating without `combine_chunks()`? (4) Python references — are you holding references to large arrays? Common culprit: keeping a small slice pins the entire parent buffer.
+
+### Concept 5: pandas interop
+
+**Q1: What's the difference between `df.to_pandas()` and `df.to_pandas(dtype_backend="pyarrow")`?**
+
+A: Default: pandas uses numpy dtypes (int64, float64, object). Arrow-backed: pandas uses Arrow dtypes (int64[pyarrow], string[pyarrow]). Arrow-backed is: (1) more memory-efficient (no object overhead), (2) preserves nullability (numpy can't represent null integers), (3) zero-copy when converting back to Arrow. Use Arrow-backed for analytical workloads.
+
+**Q2: How do you convert a pandas DataFrame with object columns to Arrow efficiently?**
+
+A: `pa.Table.from_pandas(df, schema=arrow_schema)`. The schema ensures string columns become `pa.string()`, not `pa.large_string()`. For large DataFrames: convert column-by-column to avoid peak memory. Or use `dtype_backend="pyarrow"` in pandas to keep Arrow dtypes throughout.
+
+**Q3: Why is `df.values` slow for Arrow conversion?**
+
+A: `df.values` returns a numpy array — for object columns, this creates a numpy object array (Python objects). Then `pa.array(df.values)` must convert each Python object to Arrow. Instead: `pa.Table.from_pandas(df)` extracts numpy arrays from each column directly (vectorized, no Python objects).
+
+**Q4: How do you streaming pandas DataFrames to Arrow without materializing the full table?**
+
+A: Use `pa.RecordBatch.from_pandas(df_chunk)` for each chunk, then `pa.Table.from_batches(batches)`. Or use DuckDB: `con.register("df", df); con.sql("SELECT ... FROM df").arrow()`. Both avoid materializing the full DataFrame in Arrow — process chunk-by-chunk.
+
+**Q5: A pandas DataFrame has 100 columns. How do you convert to Arrow with minimal memory?**
+
+A: Convert column-by-column: `columns = {col: pa.array(df[col]) for col in df.columns}; table = pa.table(columns)`. This avoids peak memory from `pa.Table.from_pandas()` which may copy all columns simultaneously. Or use `dtype_backend="pyarrow"` to keep pandas columns as Arrow-backed from the start.
+
+---
+
+## 13. Cheat sheet
 
 | Task | PyArrow |
 |---|---|

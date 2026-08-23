@@ -7,6 +7,27 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-the-problem-arrow-solves-the-n-by-m-serialization-swamp) | The problem Arrow solves |
+| [1.1](#11-the-serialization-anatomy--every-hop-costs-cpu-and-ram) | Serialization anatomy — every hop costs CPU and RAM |
+| [1.2](#12-what-arrow-eliminates) | What Arrow eliminates |
+| [2](#2-architecture-the-arrow-stack) | Architecture: the Arrow stack |
+| [3](#3-the-memory-model--what-an-arrow-array-actually-is) | The memory model |
+| [4](#4-core-containers) | Core containers |
+| [5](#5-zero-copy-slicing-ipc-and-the-c-data-interface) | Zero-copy: slicing, IPC, and the C Data Interface |
+| [6](#6-where-arrow-sits-in-this-course) | Where Arrow sits in this course |
+| [7](#7-banking-scenario-walkthrough) | Banking scenario walkthrough |
+| [7.1](#71-real-world-banking-scenario-fraud-feature-pipeline-without-vs-with-arrow) | Real-world: fraud feature pipeline (WITHOUT vs WITH Arrow) |
+| [7.5](#75-proving-it-serialization-benchmarks-that-quantify-the-savings) | Serialization benchmarks |
+| [8](#8-end-to-end-example) | End-to-end example |
+| [9](#9-exercises) | Exercises |
+| [10](#10-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. The problem Arrow solves: the N-by-M serialization swamp
 
 Before Arrow, every system had its own memory representation:
@@ -1178,7 +1199,123 @@ copying them once.
    `read_json`, `json.dumps`, `json.loads`, `pickle.dump`, `pickle.load`. Count the
    calls — each one is a serialization boundary. Which ones can Arrow replace?
 
-## 10. Cheat sheet
+---
+
+## 10. Interview questions: Arrow and serialization
+
+### Concept 1: Arrow memory model
+
+**Q1: Explain the Arrow memory layout. Why is this better than pandas' object arrays?**
+
+A: Arrow stores data in contiguous, aligned buffers: a validity bitmap (1 bit/value) + data buffer (fixed-width) + offsets buffer (variable-length). Pandas object arrays store Python objects with per-object headers (16-32 bytes overhead per value). For 1 billion float64s: Arrow = 8 GB exactly, pandas objects = ~32 GB. Arrow is 4× more memory-efficient and SIMD-friendly.
+
+**Q2: What is the C Data Interface, and why does it matter for cross-language data sharing?**
+
+A: The C Data Interface is a stable ABI (two structs with pointers) that lets different runtimes share Arrow arrays without copying. DuckDB (C++) reads Python-owned Arrow buffers directly. Java reads the same buffers via JNI. No serialization, no conversion — just pointer passing. This eliminates the M×M converter problem (M systems × M targets).
+
+**Q3: How does Arrow handle null values differently from pandas?**
+
+A: Arrow uses a validity bitmap (1 bit per value, 1=valid, 0=null). The data buffer still holds a value for nulls (unused but allocated). This is cheap: null counting = popcount operation (SIMD-optimized). Pandas uses NaN (float) or None (object), which requires per-value checks and breaks SIMD. Arrow's bitmap is 8× more memory-efficient than pandas' object approach.
+
+**Q4: What's the difference between a RecordBatch and a Table in Arrow?**
+
+A: RecordBatch = equal-length arrays + schema = unit of IPC/streaming (like a page). Table = columns as ChunkedArrays = full dataset (like a book). RecordBatches are what Flight streams (65K rows each). Tables are what you query. ChunkedArray allows incremental building without reallocation — append chunks, not rebuild buffers.
+
+**Q5: Why is Arrow's string array layout (offsets + data buffer) more efficient than pandas' object array?**
+
+A: Arrow stores strings as: offsets buffer (n+1 int32s) + one contiguous UTF-8 data buffer. Pandas stores a Python str object per value (49 bytes overhead per string). For 1M strings averaging 10 chars: Arrow ≈ 14 MB (4MB offsets + 10MB data), pandas ≈ 59 MB (49MB objects + 10MB data). Arrow is 4× smaller and enables SIMD operations on offsets.
+
+### Concept 2: Serialization and zero-copy
+
+**Q1: A data pipeline has 5 serialization boundaries (CSV→pandas→JSON→HTTP→JSON→pandas). How do you quantify the overhead?**
+
+A: Measure each boundary with `time.perf_counter()`. Typical: CSV write (2.3s) + CSV read (0.4s) + JSON encode (1.8s) + JSON decode (0.4s) = 4.9s overhead. With Arrow: IPC write (0.06s) + IPC read (0.05s) + zero-copy (0.001s) = 0.11s. The savings: 4.9s - 0.11s = 4.79s per batch. At 100 batches/day: 479s = 8 minutes of CPU saved.
+
+**Q2: What does "zero-copy" actually mean in Arrow? Does it ever copy data?**
+
+A: Zero-copy means passing data between systems without creating copies of the underlying buffers. `arr.slice(1000, 500)` returns metadata pointing INTO the original buffer — no copy. `con.register("t", table)` hands DuckDB pointers to Python's buffers — no copy. However, operations like `filter()` or `take()` may copy surviving values into new buffers. Zero-copy is about handoff, not computation.
+
+**Q3: Why is JSON serialization so slow compared to Arrow IPC?**
+
+A: JSON is text-based: numbers → strings (formatting), strings → escaped text (encoding), objects → key-value pairs (structure). Each conversion is pure Python (no SIMD). Arrow IPC is binary: memcpy buffers + flatbuffers metadata. No parsing, no type conversion, no escaping. For 1M rows: JSON ≈ 1.8s (encoding) + 0.4s (parsing) = 2.2s. Arrow IPC ≈ 0.05s (memcpy) = 0.05s. The difference: 44×.
+
+**Q4: A bank's Java risk engine needs data from a Python feature pipeline. How does Arrow help?**
+
+A: Python exports Arrow IPC file or Flight stream. Java reads the same Arrow buffers via the C Data Interface (arrow-java library). No JSON/protobuf encoding, no type mapping, no null handling differences. The data stays in Arrow format from Python → disk/network → Java. Serialization cost: near zero.
+
+**Q5: When should you NOT use Arrow? What are its limitations?**
+
+A: Don't use Arrow when: (1) data is small and simple (JSON is fine for config), (2) you need human-readable formats (CSV for debugging), (3) cross-language isn't required (pickle is faster for Python-only), (4) you need compression (use Parquet, not IPC). Arrow excels at high-volume, cross-system data movement — not every use case.
+
+### Concept 3: Compute kernels
+
+**Q1: How do Arrow compute kernels differ from numpy operations?**
+
+A: Arrow kernels operate on Arrow arrays (buffer-backed, null-aware). NumPy operates on ndarray (no null support). Arrow's `pc.filter()` handles nulls correctly; numpy's boolean indexing doesn't. Performance is comparable for numeric data (both use SIMD), but Arrow handles strings, nulls, and nested types that numpy can't. Arrow kernels are the "numpy for analytical data."
+
+**Q2: Why is `pc.sum()` on an Arrow array faster than `pandas.Series.sum()` for object dtypes?**
+
+A: Pandas object Series stores Python objects — summing requires iterating through Python objects (no SIMD). Arrow's `pc.sum()` operates on contiguous int64/float64 buffers with SIMD instructions. The difference: Arrow ≈ 0.01s for 100M values, pandas object ≈ 1.0s. For numeric dtypes, they're comparable (both use numpy internally).
+
+**Q3: A fraud query needs `WHERE is_fraud = 1 AND amount > 500`. How does Arrow optimize this?**
+
+A: Arrow kernels execute vectorized: (1) `pc.equal(is_fraud, 1)` produces a boolean bitmap (SIMD), (2) `pc.greater(amount, 500)` produces another bitmap (SIMD), (3) `pc.and_()` combines them (bitwise SIMD), (4) `pc.filter(table, mask)` gathers matching rows. All operations are parallel, null-aware, and avoid Python loops.
+
+**Q4: How does ChunkedArray affect compute kernel performance?**
+
+A: Kernels iterate chunks independently — each chunk fits in L1/L2 cache. This is cache-friendly and parallelizable. However, cross-chunk operations (e.g., global sort) require combining chunks first. For aggregations (sum, count), chunked processing is ideal — aggregate per chunk, then combine. For window functions, `combine_chunks()` may be needed.
+
+**Q5: What's the difference between `pc.filter()` and `pc.take()` in Arrow?**
+
+A: `pc.filter(array, mask)` selects rows where mask is true (like SQL WHERE). `pc.take(array, indices)` selects rows at specific positions (like numpy fancy indexing). Both create new arrays with surviving values. Filter is more common for queries; take is used for joins and window functions. Both are vectorized and null-aware.
+
+### Concept 4: IPC and Flight
+
+**Q1: What's the difference between Arrow IPC file and IPC stream formats?**
+
+A: IPC file (Feather V2) = random access (seek to any record batch). IPC stream = sequential access (read batches in order). Files are better for persistence (can read any batch without reading前面的). Streams are better for Flight/gRPC (batch-by-batch delivery). Both use the same Arrow buffer layout — the difference is metadata organization.
+
+**Q2: How does Flight SQL achieve "zero serialization" at the network boundary?**
+
+A: Flight streams Arrow RecordBatches as gRPC frames. The bytes on the wire ARE the Arrow buffers — no encoding/decoding. On receive, the client reattaches metadata (flatbuffers) to the buffers. The network cost is just memcpy (send) + mmap (receive). Compare to REST+JSON: serialize (1.8s) + transfer + deserialize (0.4s) = 2.2s overhead. Flight: 0.04s.
+
+**Q3: Why is Arrow IPC larger than Parquet for the same data?**
+
+A: IPC stores raw fixed-width values with no compression. Parquet adds dictionary encoding, RLE, and ZSTD compression. For 1M float64s: IPC ≈ 8 MB (raw), Parquet ≈ 1 MB (compressed). IPC trades size for speed (zero-parse). Parquet trades speed for size (decode overhead). Use IPC for in-memory/network; Parquet for storage.
+
+**Q4: A bank streams 10 GB of transaction data via Flight. What's the latency?**
+
+A: At 1 Gbps network: 10 GB / 1 Gbps = 80 seconds (network bound). At 10 Gbps: 8 seconds. The serialization overhead is near zero (memcpy). Compare to JSON: 30 GB payload (3× inflation) at 1 Gbps = 240 seconds + 10s parsing = 250 seconds. Flight is 3× faster just from payload size, plus zero parsing.
+
+**Q5: How does Flight handle schema evolution (adding a column)?**
+
+A: Flight carries the Arrow schema in FlightInfo. If the schema changes, the server returns a new schema in get_flight_info. Clients validate the schema before reading data. If a client doesn't recognize a new column, it can skip it (Arrow's columnar layout allows this). Schema evolution is safe because Arrow schemas are self-describing.
+
+### Concept 5: Real-world banking scenarios
+
+**Q1: A bank's fraud pipeline processes 2M rows/day. The current CSV+JSON pipeline takes 8 seconds. How do you prove Arrow's value?**
+
+A: Benchmark both paths: (1) CSV→pandas→JSON→pandas→Parquet (current), (2) Parquet→Arrow→IPC→Arrow→Parquet (Arrow). Measure: wall time, peak RAM, CPU usage. Expected: Arrow path 10-20× faster, 3× less RAM. Present: "Arrow saves 7 seconds/batch × 365 days = 42 minutes/year of CPU. At $0.10/hour: $7 savings. Plus: faster fraud alerts, less CPU contention."
+
+**Q2: How do you convince management to adopt Arrow when the current system "works"?**
+
+A: Quantify the cost of "working": (1) Developer time maintaining serialization glue code (hours/week), (2) Latency impacting fraud detection (delayed alerts = card losses), (3) RAM overhead (bigger machines = higher cloud bills), (4) Cross-team friction (Python team vs Java team format wars). Arrow eliminates all four. Present: "Arrow isn't a rewrite — it's removing code, not adding it."
+
+**Q3: A regulatory audit asks "prove the data wasn't altered during transfer." How does Arrow help?**
+
+A: Arrow's immutability guarantee: once built, arrays are read-only. IPC files are self-describing (schema + buffers). Hash the Arrow buffers before/after transfer — identical hashes prove no alteration. Compare to JSON: text encoding can change (whitespace, key order), making hash verification unreliable. Arrow's binary layout is deterministic.
+
+**Q4: The ML team needs yesterday's features. The current pipeline exports CSV, which takes 5 minutes. How do you optimize?**
+
+A: Replace CSV export with Arrow IPC or Flight stream. CSV: 5 minutes (text encoding + parsing). Arrow IPC: 3 seconds (memcpy). Flight: 1 second (zero-copy stream). The ML team receives Arrow tables directly — no pandas conversion needed. Total pipeline: 5 minutes → 4 seconds = 75× faster.
+
+**Q5: How do you handle Arrow's memory overhead when processing 100 GB datasets on a 32 GB machine?**
+
+A: Use RecordBatch streaming: process 65K-row batches (a few MB each), not the entire table. Arrow's ChunkedArray supports this natively. DuckDB streams batches via `to_arrow_reader(4096)`. Flight streams batches via `do_get()`. The key: never materialize the full dataset — stream, process, and write incrementally.
+
+---
+
+## 11. Cheat sheet
 
 | Concept | Fact |
 |---|---|

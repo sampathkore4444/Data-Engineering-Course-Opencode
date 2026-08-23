@@ -9,6 +9,26 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-concept-why-a-protocol-not-another-database) | Concept: why a protocol, not another database |
+| [2](#2-foundation-grpc-in-five-sentences) | Foundation: gRPC in five sentences |
+| [3](#3-the-flight-data-model) | The Flight data model |
+| [4](#4-flight-sql-the-standardized-vocabulary) | Flight SQL: the standardized vocabulary |
+| [5](#5-authentication--security) | Authentication & security |
+| [6](#6-streaming--partitioned-results) | Streaming & partitioned results |
+| [7](#7-banking-scenario-walkthrough) | Banking scenario walkthrough |
+| [7.1](#71-real-world-banking-scenario-the-monday-morning-crisis) | Real-world: Monday morning crisis |
+| [7.2](#72-real-world-banking-scenario-serving-fraud-data-rest-api-vs-flight-sql) | Real-world: REST API vs Flight SQL |
+| [8](#8-end-to-end-example-raw-flight-in-60-lines) | End-to-end example |
+| [8.5](#85-serialization-cost-analysis-flight-vs-rest-vs-jdbc) | Serialization cost analysis |
+| [9](#9-exercises) | Exercises |
+| [10](#10-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. Concept: why a *protocol*, not another database
 
 Your data lives in Parquet files and Iceberg tables (storage truth - Lessons 02, 06).
@@ -1020,7 +1040,123 @@ AFTER (Arrow Flight):
    downloads simultaneously. Measure total throughput (rows/second) for each. How does
    Arrow's zero-parse advantage scale with concurrency?
 
-## 10. Cheat sheet
+---
+
+## 10. Interview questions: Flight SQL in banking
+
+### Concept 1: Flight protocol fundamentals
+
+**Q1: Explain the two-phase execution model in Flight. Why is this better than one-phase?**
+
+A: Phase 1: `get_flight_info` plans the query and returns schema + endpoints (no data). Phase 2: `do_get(ticket)` streams the actual data. Benefits: (1) clients can validate schema before reading, (2) clients can fan out to multiple endpoints (parallel reads), (3) first-row latency is milliseconds (schema arrives instantly). One-phase would require reading all data before returning anything.
+
+**Q2: What's the difference between FlightDescriptor.PATH and FlightDescriptor.COMMAND?**
+
+A: PATH names a dataset (e.g., `for_path("bank", "card_txns")`). COMMAND carries an opaque request (e.g., `for_command(b"SELECT ...")`). PATH is for known datasets; COMMAND is for ad-hoc queries. Flight SQL uses COMMAND for SQL statements and PATH for table references. The server decides how to interpret each.
+
+**Q3: How does Flight achieve zero serialization at the network boundary?**
+
+A: Flight streams Arrow RecordBatches as gRPC frames. The bytes on the wire ARE the Arrow buffers — no encoding/decoding. On receive, the client reattaches metadata (flatbuffers) to the buffers. The cost: memcpy (send) + metadata reattach (receive). Compare to REST+JSON: serialize (1.8s) + transfer + deserialize (0.4s) = 2.2s. Flight: 0.04s.
+
+**Q4: What's the role of the Ticket in Flight?**
+
+A: A Ticket is an opaque token that identifies a specific result set. The client receives it from `get_flight_info` and passes it to `do_get`. The server uses the ticket to locate and stream the data. Tickets can encode: query text, snapshot IDs, partition information, or any read handle. They're opaque to the client — the server decides what they mean.
+
+**Q5: How does Flight handle large result sets that don't fit in memory?**
+
+A: Flight streams RecordBatches incrementally (typically 65K rows each). The client processes each batch as it arrives — never materializing the full result. This is constant memory: 65K rows × row_size = a few MB. Compare to REST: the full JSON response must be received before parsing. Flight's streaming model enables processing datasets larger than memory.
+
+### Concept 2: Flight SQL specifics
+
+**Q1: What is Flight SQL, and how does it differ from raw Flight?**
+
+A: Flight is a generic RPC framework for Arrow streams. Flight SQL adds a standard vocabulary: SQL commands (CommandStatementQuery), prepared statements, catalog browsing, transaction management. Without Flight SQL, each server invents its own command protocol. With Flight SQL, any compliant client works with any compliant server — like JDBC/ODBC but columnar.
+
+**Q2: How do prepared statements work in Flight SQL?**
+
+A: (1) Client sends `CreatePreparedStatement` action with SQL. (2) Server parses/plans, returns opaque handle. (3) Client binds parameters via `do_put` (typed Arrow values!). (4) Client executes via `get_flight_info(CommandPreparedStatementQuery{handle})`. (5) Client closes via `ClosePreparedStatement` action. Benefits: parse-once-run-many, injection safety, parameter typing.
+
+**Q3: What's the difference between `do_get` and `do_put` in Flight SQL?**
+
+A: `do_get` = read path (server streams Arrow batches to client). `do_put` = write path (client streams Arrow batches to server, server sends app-metadata acks). For fraud queries: `do_get` streams results. For data ingestion: `do_put` uploads batches. Both use Arrow RecordBatches — zero serialization.
+
+**Q4: How does Flight SQL handle authentication and authorization?**
+
+A: Three layers: (1) TLS (transport encryption), (2) Handshake (credentials → JWT token), (3) Per-call token validation (server checks identity on every call). Authorization: server code checks `ctx.peer_identity()` against allow-lists (e.g., `svc_etl` can only `do_put`, `risk_analyst` can only query). Row/column filtering happens in the engine or via views.
+
+**Q5: How does Flight SQL replace 12 different CSV/SFTP exports at Meridian?**
+
+A: One Flight SQL gateway serves all teams: fraud analysts (Python + pyarrow), treasury (JDBC driver), regulator (ODBC), ML engineers (Arrow). Each team connects to the same endpoint with their preferred client. The gateway handles: authentication, authorization, query routing, audit logging. Result: 12 pipelines → 1 endpoint, one audit trail, real-time freshness.
+
+### Concept 3: Serialization analysis
+
+**Q1: Why is Flight 40× faster than REST+JSON for the same query?**
+
+A: REST overhead: JSON encode (0.45s) + transfer (0.02s) + JSON parse (0.4s) + pandas convert (0.15s) = 1.02s. Flight overhead: Arrow memcpy (0.001s) + transfer (0.02s) + metadata reattach (0.001s) = 0.022s. The difference: 1.02s / 0.022s = 46×. The bulk of REST overhead is JSON encoding/parsing (pure Python, no SIMD).
+
+**Q2: How does Flight's payload size compare to JSON?**
+
+A: For 1M rows × 5 float columns: Arrow IPC ≈ 48 MB (raw binary). JSON ≈ 156 MB (text + field names + type markers). Ratio: 3.3×. For strings: the ratio is worse (JSON escapes special characters, stores field names per row). For nested data: JSON is even larger (repeated structure). Arrow's binary layout is always more compact.
+
+**Q3: What's the difference between Flight and JDBC/ODBC?**
+
+A: JDBC/ODBC are row-oriented: server converts columnar data to rows, client converts rows to application objects. Flight is columnar: Arrow batches stay columnar end-to-end. JDBC/ODBC: row-by-row fetch callback, driver overhead, type conversion. Flight: batch streaming, zero-copy, Arrow-native. For analytical workloads: Flight is 10-100× faster.
+
+**Q4: How does Flight handle schema evolution (adding a column)?**
+
+A: Flight carries the Arrow schema in FlightInfo. If the schema changes, the server returns a new schema in `get_flight_info`. Clients validate the schema before reading data. If a client doesn't recognize a new column, it can skip it (Arrow's columnar layout allows this). Schema evolution is safe because Arrow schemas are self-describing.
+
+**Q5: A bank streams 10 GB of transaction data via Flight. What's the latency?**
+
+A: At 1 Gbps network: 10 GB / 1 Gbps = 80 seconds (network bound). Serialization overhead: near zero (memcpy). Compare to JSON: 30 GB payload (3× inflation) at 1 Gbps = 240 seconds + 10s parsing = 250 seconds. Flight is 3× faster just from payload size, plus zero parsing. For local (same machine): Flight ≈ 0.1s (memory copy), JSON ≈ 2s (encode + parse).
+
+### Concept 4: Banking scenarios
+
+**Q1: A bank's fraud dashboard needs sub-second query results. How does Flight help?**
+
+A: Flight eliminates JSON parsing overhead: REST = 1.8s (query + JSON parse), Flight = 0.04s (query + Arrow memcpy). For 50 concurrent analysts: REST total wait = 90s, Flight total wait = 2s. The dashboard refreshes in 0.4s vs 2.3s. During market stress: Flight stays responsive (Arrow batches stream), REST freezes (JSON parsing saturates CPU).
+
+**Q2: How do you handle 12 teams with different access patterns (Python, R, JDBC, ODBC)?**
+
+A: One Flight SQL gateway serves all: Python teams use `pyarrow.flight`, R teams use `adbc`, Java teams use JDBC Flight SQL driver, BI tools use ODBC Flight SQL driver. The gateway handles: authentication (JWT), authorization (role-based), query routing, audit logging. Result: one endpoint, all languages, one audit trail.
+
+**Q3: How do you prove to a regulator that data wasn't altered during transfer?**
+
+A: Flight's Arrow format is binary and deterministic — same buffers produce identical bytes. Hash the Arrow batches before/after transfer. Compare hashes: identical = no alteration. Compare to JSON: text encoding can change (whitespace, key order), making hash verification unreliable. Arrow's binary layout is verifiable.
+
+**Q4: How do you handle Flight SQL in a multi-cloud environment?**
+
+A: Flight SQL is cloud-agnostic — it's just gRPC over HTTP/2. Deploy the gateway anywhere: AWS, GCP, Azure, on-prem. The gateway reads from S3/GCS/ADLS via DuckDB or Spark. Clients connect via gRPC (firewall-friendly). The key: Flight SQL is a protocol, not a service — it runs anywhere.
+
+**Q5: How do you migrate from REST API to Flight SQL?**
+
+A: (1) Deploy Flight SQL gateway alongside REST API. (2) Migrate one team at a time (start with Python fraud team). (3) Validate: same results, faster performance. (4) Migrate remaining teams. (5) Decommission REST endpoints. The key: Flight SQL is additive — you can run both in parallel during migration.
+
+### Concept 5: Production patterns
+
+**Q1: How do you handle Flight SQL server scaling?**
+
+A: Options: (1) Multiple gateway instances behind load balancer (stateless, scales horizontally), (2) Each instance connects to the same DuckDB/Iceberg backend, (3) Client-side failover (try next endpoint on failure), (4) Read replicas for read-heavy workloads. The gateway is stateless — all state is in the backend (DuckDB, Iceberg). Scaling is straightforward.
+
+**Q2: How do you monitor Flight SQL performance?**
+
+A: Track: (1) query latency (get_flight_info + do_get), (2) bytes served per query, (3) concurrent connections, (4) error rate (authentication failures, timeouts). Log: principal, query, bytes, timestamp. Alert on: latency > 1s, error rate > 1%, concurrent connections > threshold. The gateway is the observability layer.
+
+**Q3: How do you handle Flight SQL in a Kubernetes environment?**
+
+A: Deploy gateway as Kubernetes Deployment (stateless pods). Service: ClusterIP for internal access, LoadBalancer for external. HPA: scale pods based on CPU/connection count. ConfigMap: gateway configuration (backend URLs, auth settings). Secrets: TLS certificates, JWT keys. The gateway is a standard microservice — Kubernetes handles scaling, health checks, rolling updates.
+
+**Q4: How do you handle Flight SQL with Iceberg tables?**
+
+A: Gateway reads Iceberg tables via DuckDB's Iceberg extension: `con.sql("SELECT * FROM iceberg_scan('metadata.json')")`. Or via PyIceberg: `table.scan().to_arrow()`. The gateway is agnostic to the backend — it serves Arrow batches regardless of whether they come from Parquet, Iceberg, or DuckDB. The key: Flight SQL is the protocol, Iceberg is the storage.
+
+**Q5: How do you handle Flight SQL security in production?**
+
+A: (1) TLS everywhere (grpc+tls://), (2) JWT tokens with short expiry (1 hour), (3) Role-based access control (svc_etl → write, risk_analyst → read), (4) Row/column filtering via views, (5) Audit logging (principal, query, bytes, timestamp), (6) Rate limiting (prevent abuse), (7) Network policies (Kubernetes NetworkPolicy). The gateway is the security boundary.
+
+---
+
+## 11. Cheat sheet
 
 | Concept | Fact |
 |---|---|

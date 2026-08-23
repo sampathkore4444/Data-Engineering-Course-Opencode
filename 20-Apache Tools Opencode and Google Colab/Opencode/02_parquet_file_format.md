@@ -7,6 +7,24 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-what-parquet-is) | What Parquet is |
+| [2](#2-file-anatomy) | File anatomy |
+| [3](#3-encodings-inside-parquet) | Encodings inside Parquet |
+| [4](#4-compression) | Compression |
+| [5](#5-predicate--projection-pushdown--how-skipping-actually-works) | Predicate & projection pushdown |
+| [6](#6-datasets-many-files--one-logical-dataset) | Datasets: many files = one logical dataset |
+| [7](#7-banking-scenario-walkthrough) | Banking scenario walkthrough |
+| [8](#8-end-to-end-example) | End-to-end example |
+| [9](#9-where-plain-parquet-hurts-the-iceberg-cliffhanger) | Where plain Parquet hurts |
+| [10](#10-exercises) | Exercises |
+| [11](#11-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. What Parquet is
 
 **Apache Parquet** is a language-independent, open-source **columnar storage file format**
@@ -521,7 +539,123 @@ Iceberg (Lessons 06–07) adds a metadata tree over files to solve all six.
 8. Enable bloom on `card_id` with fpp=0.01 and fpp=0.001. Compare file sizes and measure
    how many false-positive chunk decodes each produces for 1000 random card lookups.
 
-## 11. Cheat sheet
+---
+
+## 11. Interview questions: Parquet in banking
+
+### Concept 1: Parquet file structure
+
+**Q1: Explain the Parquet file hierarchy. Why does this structure matter for analytical queries?**
+
+A: File → Row Groups → Column Chunks → Pages. Row groups are the unit of parallelism — each can be read independently. Column chunks store all values for one column in a row group. Pages are the unit of compression and I/O (typically 1MB). For analytics, this means: (1) you can skip entire row groups via min/max stats, (2) you read only needed column chunks, and (3) pages compress independently.
+
+**Q2: Why does Parquet store the file footer at the END, not the beginning?**
+
+A: The footer contains schema, statistics, and bloom filters — metadata needed to plan the query. By storing it at the end, writers can append row groups without rewriting the footer. Readers seek to the end, read the footer (few KB), plan which row groups to skip, then read only the needed data. This is efficient for both writing (append-only) and reading (metadata-first).
+
+**Q3: A Parquet file has 10 row groups. A query filters on `amount > 1000`. How does Parquet skip data?**
+
+A: Each row group stores min/max statistics for `amount`. If a row group's max is 500, the entire row group is skipped without reading any data. With 10 row groups, if 7 have max < 1000, you skip 70% of the file. This is predicate pushdown at the row group level.
+
+**Q4: What's the difference between row group size and page size, and how do they affect performance?**
+
+A: Row group size (typically 128MB-1GB) determines parallelism — each row group can be read by a different thread. Page size (typically 1MB) determines compression and I/O granularity — smaller pages compress better but have more overhead. For banking analytics: larger row groups = fewer files to manage, smaller pages = better compression and skipping.
+
+**Q5: How does Parquet handle nested data (e.g., a transaction with multiple line items)?**
+
+A: Parquet uses Dremel-style record shredding with repetition and definition levels. A nested STRUCT becomes multiple columns with the same name, distinguished by repetition/definition levels. This flattens nested data into columnar format while preserving the structure. Readers reconstruct the nesting using these levels.
+
+### Concept 2: Encodings and compression
+
+**Q1: A bank stores transaction amounts as `DECIMAL(18,2)`. Which Parquet encoding is most effective, and why?**
+
+A: Delta encoding + dictionary encoding. Decimal values are typically sorted or clustered (amounts around similar ranges). Delta encoding stores differences between consecutive values (small integers). Dictionary encoding groups similar values. Combined with ZSTD compression, this can reduce storage by 5-10× compared to raw decimals.
+
+**Q2: Why does SNAPPY compression perform better than GZIP for analytical workloads?**
+
+A: SNAPPY is optimized for speed (compression/decompression throughput), while GZIP is optimized for ratio. Analytical workloads are I/O-bound, so decompression speed matters more than file size. SNAPPY decompresses 2-3× faster than GZIP, which directly translates to faster queries. The file size difference is typically only 10-20%.
+
+**Q3: How does dictionary encoding interact with predicate pushdown for a `currency` column?**
+
+A: Dictionary encoding stores a small dictionary (EUR, USD, GBP) and 1-byte indices. When filtering `currency = 'EUR'`, Parquet checks if 'EUR' is in the dictionary (O(1) lookup). If not present, the entire column chunk is skipped. If present, it filters the 1-byte indices. This is much faster than scanning string values.
+
+**Q4: A Parquet file uses ZSTD compression. What's the typical compression ratio for numeric banking data?**
+
+A: For sorted numeric data (timestamps, IDs), ZSTD achieves 8-15× compression. For unsorted amounts, 4-8×. For low-cardinality strings (currency, status), 10-20× with dictionary encoding. Realistic overall: 5-10× for mixed banking data. The exact ratio depends on data distribution, sort order, and ZSTD level.
+
+**Q5: Why is LZ4 preferred for hot data and ZSTD for cold data?**
+
+A: LZ4 is the fastest compression/decompression algorithm — ideal for frequently queried (hot) data where decompression speed matters. ZSTD achieves better compression ratios — ideal for rarely queried (cold) data where storage cost matters. The trade-off: LZ4 decompresses 2× faster but compresses 30% less than ZSTD.
+
+### Concept 3: Partitioning and pushdown
+
+**Q1: A banking table is partitioned by `date`. A query filters `date = '2026-07-15' AND amount > 1000`. How does Parquet optimize this?**
+
+A: Two-level pruning: (1) Partition pruning — only the `date=2026-07-15` directory is scanned (skips 364 other days). (2) Row group pruning — within that day's files, row groups with max(amount) ≤ 1000 are skipped. (3) Page pruning — within surviving row groups, pages with max ≤ 1000 are skipped. The result: only relevant pages are decompressed.
+
+**Q2: What's the problem with partitioning by `card_id` (high cardinality)?**
+
+A: Too many partitions (one per card = millions of directories). This causes: (1) listing overhead — S3 API calls to list millions of objects, (2) small files — each partition has few rows, (3) metadata bloat — millions of partition entries. Better: partition by date (low cardinality) and use bucketing for card_id.
+
+**Q3: How does predicate pushdown differ from partition pruning?**
+
+A: Partition pruning eliminates entire directories before reading any data (e.g., skip all days except July 15). Predicate pushdown eliminates row groups within a partition using min/max statistics (e.g., skip row groups where max(amount) < 1000). Partition pruning is coarse-grained (directory level), predicate pushdown is fine-grained (row group level).
+
+**Q4: A bank has 100 TB of transaction data partitioned by month. A query needs 3 months of data. How much data is actually read?**
+
+A: With partition pruning, only 3/12 = 25% of directories are listed. Within those directories, predicate pushdown may skip additional row groups. Realistic: 20-25% of total data is scanned. Without partitioning, 100% would be scanned. The savings come from avoiding I/O on 9 months of irrelevant data.
+
+**Q5: Why does Parquet store min/max statistics per row group, not per file?**
+
+A: Row groups are the unit of parallelism and skipping. Per-file statistics would be too coarse — a 1GB file might have row groups ranging from 100 to 5000 in amount. Per-row-group statistics allow finer-grained skipping. The overhead is minimal (a few bytes per row group) but the skipping benefit is enormous.
+
+### Concept 4: Bloom filters
+
+**Q1: When should you use a Bloom filter on a Parquet column? When should you NOT?**
+
+A: USE for: high-cardinality equality lookups (card_id, txn_uuid) where min/max can't help. DON'T USE for: low-cardinality columns (currency, status) — dictionary encoding is more efficient. DON'T USE for: range queries — Bloom filters only help with equality. The trade-off: ~10 bits/value storage overhead vs skipping unnecessary decodes.
+
+**Q2: A Bloom filter has fpp=0.01 (1% false positive rate). What does this mean in practice?**
+
+A: For 1000 random lookups, 10 will falsely match (the Bloom filter says "maybe present" when it's not). This causes 10 unnecessary page decodes. The benefit: 990 lookups are answered without decoding any pages. The net effect: 99% of equality lookups are answered instantly.
+
+**Q3: How does a Bloom filter interact with dictionary encoding?**
+
+A: Dictionary encoding stores a small dictionary (e.g., 1000 card_ids). A Bloom filter on the same column adds a probabilistic membership test. For equality lookups: check Bloom filter first (O(1)), then dictionary (O(1)). The Bloom filter skips column chunks where the value definitely isn't present; the dictionary confirms presence. Together, they're extremely efficient.
+
+**Q4: A bank queries `card_id = 300001` across 1000 Parquet files. Without Bloom filters, how many pages are decoded?**
+
+A: Without Bloom filters: every page containing `card_id` must be decoded to check for the value. With 1000 files × 10 row groups × 5 pages = 50,000 page decodes. With Bloom filters: only pages where the Bloom filter says "maybe present" are decoded — typically 5-50 page decodes. The savings: 1000× fewer decodes.
+
+**Q5: Why is Bloom filter size measured in bits per value, not bytes?**
+
+A: Bloom filter space is proportional to the number of values, not their size. A card_id (8 bytes) and a timestamp (8 bytes) each need ~10 bits for a 1% fpp. The filter doesn't store the values — it stores hash fingerprints. The bits-per-value metric directly tells you the overhead: 10 bits/value × 1M values = 1.25 MB overhead.
+
+### Concept 5: Time zones and timestamps
+
+**Q1: A Tokyo transaction at 11 PM JST on July 15 is stored as `2026-07-15 23:00:00 JST`. If the reader interprets this as UTC, which partition does it land in?**
+
+A: UTC would be `2026-07-15 14:00:00` — still July 15. But if the timestamp were 10 AM JST on July 16, UTC would be `2026-07-16 01:00:00` — July 16 in UTC but July 15 in JST. This is why banks must normalize to UTC at ingestion: the same transaction lands in different partitions depending on timezone interpretation.
+
+**Q2: Why does Parquet store timestamps as microseconds since epoch, not as strings?**
+
+A: Epoch timestamps are fixed-width integers (8 bytes) that compress well (delta encoding) and sort correctly. Strings like "2026-07-15 23:00:00" are variable-length, don't compress as well, and sorting is lexicographic ("9" > "10"). Epoch timestamps enable efficient range queries and partition pruning.
+
+**Q3: A bank processes transactions in 50 countries. How do you handle timezone normalization?**
+
+A: Normalize ALL timestamps to UTC at ingestion (the card switch sends local time, the ingest job converts to UTC). Store with `tz="UTC"` metadata. For display, convert to local timezone at query time. This ensures: (1) consistent partitioning, (2) correct comparisons across timezones, (3) audit trail shows UTC (regulatory standard).
+
+**Q4: What's the difference between `timestamp_us`, `timestamp_ns`, and `timestamp_tz` in Parquet?**
+
+A: `timestamp_us` = microseconds precision, no timezone (local time). `timestamp_ns` = nanoseconds precision, no timezone. `timestamp_tz` = microseconds with timezone offset stored in the file. For banking: use `timestamp_us` with `tz="UTC"` metadata — microseconds are sufficient for transactions, UTC ensures consistency.
+
+**Q5: A regulatory report requires "transactions as of March 31st, 11:59:59 PM EST". How do you handle this in Parquet?**
+
+A: Convert the cutoff to UTC: March 31st 11:59:59 PM EST = April 1st 03:59:59 AM UTC. Filter `WHERE ts < '2026-04-01T03:59:59Z'`. Store all timestamps in UTC; convert to EST only for display. This ensures the regulatory cutoff is applied consistently regardless of the reader's timezone.
+
+---
+
+## 12. Cheat sheet
 
 | Concept | Key fact |
 |---|---|

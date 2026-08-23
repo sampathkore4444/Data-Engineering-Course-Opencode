@@ -9,6 +9,19 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-the-assignment) | The assignment |
+| [2](#2-the-complete-capstone) | The complete capstone |
+| [3](#3-where-each-lesson-shows-up) | Where each lesson shows up |
+| [4](#4-production-hardening-checklist) | Production hardening checklist |
+| [5](#5-exercises) | Exercises |
+| [6](#6-cheat-sheet-the-whole-stack-in-one-table) | Cheat sheet |
+
+---
+
 ## 1. The assignment
 
 Build a miniature lakehouse that answers four real banking questions:
@@ -246,7 +259,101 @@ What you would add before this runs for real money:
    was silently altered between two snapshots? (Hint: manifests carry per-file stats;
    snapshot lineage is hash-chained.)
 
-## 6. Cheat sheet: the whole stack in one table
+---
+
+## 6. Interview questions: capstone and full-stack integration
+
+### Concept 1: End-to-end lakehouse
+
+**Q1: Walk through the complete data flow from card authorization to fraud alert.**
+
+A: (1) Card switch sends authorization → Kafka → Bronze (raw Parquet). (2) Silver: deduplicate, validate schema, reject bad rows. (3) Gold: aggregate per-card velocity features. (4) DuckDB queries Gold for fraud patterns. (5) Flight SQL serves results to analysts. (6) Iceberg provides ACID, time travel, GDPR. (7) Catalog provides governance, audit trail. The key: each layer has a clear responsibility.
+
+**Q2: How does each technology in the stack earn its salary?**
+
+A: Parquet: compressed columnar storage. Arrow: zero-copy in-memory format. DuckDB: vectorized SQL engine. Iceberg: ACID, time travel, schema evolution. Flight SQL: governed network protocol. S3: durable cheap storage. Each layer solves a specific problem — no layer is redundant.
+
+**Q3: What's the production hardening checklist for a lakehouse?**
+
+A: (1) Auth: JWT tokens, role-based access, (2) Compaction: nightly rewrite_data_files, (3) Expiry: expire_snapshots with tagged quarter-ends, (4) Orphan cleanup: weekly remove_orphan_files, (5) Monitoring: file count, snapshot count, query latency, (6) DR: catalog backups, warehouse versioning, (7) Testing: data quality gates, pipeline tests.
+
+**Q4: How do you handle a 100TB lakehouse in production?**
+
+A: (1) Partitioning: date-based (low cardinality), (2) Compaction: nightly, target 512MB files, (3) Pruning: predicate pushdown, partition pruning, (4) Caching: DuckDB results cache, Flight SQL response cache, (5) Scaling: Spark for heavy transforms, DuckDB for interactive, (6) Monitoring: query latency, file count, storage cost.
+
+**Q5: How do you migrate from a legacy data warehouse to a lakehouse?**
+
+A: (1) Assess: what queries run, what SLAs exist, (2) Design: medallion zones, catalog, governance, (3) Build: Bronze/Silver/Gold pipelines, (4) Migrate: dual-run (warehouse + lakehouse), compare results, (5) Cutover: redirect queries to lakehouse, (6) Decommission: shut down warehouse. The key: dual-run ensures correctness before cutover.
+
+### Concept 2: Capstone integration
+
+**Q1: How does the capstone demonstrate all five layers working together?**
+
+A: Parquet (storage) → Arrow (memory) → DuckDB (compute) → Iceberg (ACID) → Flight SQL (serving). Each layer is used: Parquet files in Bronze, Arrow for zero-copy between DuckDB and Flight, DuckDB for SQL queries, Iceberg for time travel and GDPR, Flight SQL for governed access. The key: no layer is skipped.
+
+**Q2: How do you prove quarter-end state to a regulator?**
+
+A: (1) Tag the quarter-end snapshot: `create_tag(snapshot_id, "quarter_end_2026Q2")`. (2) Query: `SELECT * FROM txns VERSION AS OF tag_quarter_end_2026Q2`. (3) Show: snapshot ID, row count, metadata. (4) Verify: same query, same result, anytime. The key: Iceberg time travel makes this instant and reproducible.
+
+**Q3: How do you handle GDPR erasure across the capstone pipeline?**
+
+A: (1) Identify card_ids for the customer. (2) DELETE from Silver and Gold tables. (3) Archive pre-deletion data to compliance table. (4) Tag pre-deletion snapshot (never expires). (5) Compact affected partitions. (6) Log the operation. The key: atomic deletes + archived data + audit trail = compliant.
+
+**Q4: How does the Flight SQL gateway serve the capstone results?**
+
+A: Gateway reads Iceberg Gold table via DuckDB. Analysts query via Flight SQL (Python, JDBC, ODBC). Gateway logs: principal, query, bytes. Results stream as Arrow batches (zero-parse). The key: one governed endpoint for all consumers.
+
+**Q5: What's the production hardening story for the capstone?**
+
+A: (1) Auth: JWT tokens, role-based access at gateway, (2) Compaction: nightly, (3) Expiry: 7-day retention, tagged quarter-ends forever, (4) Monitoring: file count, snapshot count, query latency, (5) DR: catalog backups, warehouse versioning. The key: the capstone is a production-ready miniature.
+
+### Concept 3: Banking-specific patterns
+
+**Q1: How do you handle regulatory reporting in a lakehouse?**
+
+A: (1) Gold zone stores pre-aggregated regulatory marts, (2) Time travel proves historical state, (3) Tags pin quarter-end snapshots, (4) Flight SQL serves reports, (5) Audit log tracks all access. The key: regulatory reporting is a first-class use case, not an afterthought.
+
+**Q2: How do you handle PCI-DSS compliance?**
+
+A: (1) Tokenize PANs at ingestion (never store raw PANs), (2) Column masking via Iceberg views, (3) Role-based access (fraud team sees masked PAN, compliance sees audit metadata), (4) Audit logging (who accessed what, when), (5) Encryption at rest (S3 SSE). The key: PCI-DSS is about access control and audit, not just encryption.
+
+**Q3: How do you handle Basel III/SOX compliance?**
+
+A: (1) Retain transaction data for 7+ years (regulatory requirement), (2) Time travel proves historical state, (3) Tags pin audit snapshots (never expire), (4) Lineage tracking (source → Bronze → Silver → Gold), (5) Audit logs (all access tracked). The key: compliance is about reproducibility and retention.
+
+**Q4: How do you handle multi-jurisdiction data residency?**
+
+A: (1) Partition data by region (EU data in EU S3, US data in US S3), (2) Catalog enforces regional access (EU analysts see EU data only), (3) Flight SQL gateway per region (low latency), (4) Cross-region replication for DR. The key: data residency is a partitioning and access control problem.
+
+**Q5: How do you handle real-time fraud detection in a batch lakehouse?**
+
+A: (1) Bronze: streaming ingest (Kafka → Parquet), (2) Silver: real-time validation, (3) Gold: batch-aggregated features (hourly/daily), (4) Real-time layer: Redis/DuckDB for streaming features, (5) Lambda architecture: batch + real-time. The key: lakehouse is for batch; real-time needs a separate layer.
+
+### Concept 4: Interview preparation
+
+**Q1: How do you explain the lakehouse architecture to a non-technical stakeholder?**
+
+A: "A lakehouse is like a data warehouse but cheaper and more flexible. It stores data in open formats (Parquet) so any tool can read it. It has ACID transactions (like a database) so data is always consistent. It supports time travel (like git) so we can prove historical state. And it has governance (like a bank vault) so only authorized people see sensitive data."
+
+**Q2: What's the most important design decision in a lakehouse?**
+
+A: The table format (Iceberg vs Delta vs Hudi). This decision affects: (1) engine support (which tools can read the data), (2) feature set (time travel, schema evolution, partition evolution), (3) operational model (compaction, expiry, maintenance). The key: choose an open format (Iceberg) for maximum flexibility.
+
+**Q3: How do you handle a production incident in a lakehouse?**
+
+A: (1) Identify: which table, which snapshot, what changed, (2) Diagnose: was it a write failure, data corruption, or performance degradation?, (3) Fix: rollback to good snapshot (Iceberg), or compact (small files), or expire (metadata bloat), (4) Verify: query the fixed table, confirm results, (5) Post-mortem: what caused it, how to prevent. The key: Iceberg's time travel makes rollback instant.
+
+**Q4: What's the biggest mistake you see in lakehouse implementations?**
+
+A: (1) Skipping governance (no catalog, no access control, no audit), (2) Ignoring maintenance (no compaction, no expiry, small files accumulate), (3) Over-engineering (building custom when managed services exist), (4) Under-testing (no data quality checks, no pipeline tests). The key: lakehouse is not just Parquet + S3 — it's the governance and maintenance that make it production-ready.
+
+**Q5: How do you justify the cost of a lakehouse migration?**
+
+A: (1) Storage cost: Parquet on S3 is 10× cheaper than proprietary warehouse, (2) Compute cost: DuckDB/Spark are open-source, no license fees, (3) Flexibility: any tool can read the data, no vendor lock-in, (4) Compliance: time travel, audit trails, GDPR support. The key: lakehouse reduces both cost and risk.
+
+---
+
+## 7. Cheat sheet: the whole stack in one table
 
 | Layer | Tool | Key call |
 |---|---|---|

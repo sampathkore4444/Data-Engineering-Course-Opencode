@@ -8,6 +8,20 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-what-we-are-building) | What we are building |
+| [2](#2-end-to-end-example) | End-to-end example |
+| [2.1](#21-real-world-banking-scenario-the-gateway-json-envelopes-vs-arrow-batches) | Real-world: JSON envelopes vs Arrow batches |
+| [3](#3-walkthrough-the-five-moves-that-matter) | Walkthrough: the five moves that matter |
+| [3.6](#36-proving-it-serialization-benchmark-on-the-gateway) | Serialization benchmark |
+| [4](#4-exercises) | Exercises |
+| [5](#5-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. What we are building
 
 ```
@@ -928,7 +942,123 @@ AFTER (Arrow Flight):
    in pandas, and renders a chart. Measure time with Flight vs REST. How much of the
    total improvement comes from serialization vs network vs compute?
 
-## 5. Cheat sheet
+---
+
+## 5. Interview questions: Flight SQL gateway in banking
+
+### Concept 1: Gateway architecture
+
+**Q1: What's the architecture of a Flight SQL gateway in production?**
+
+A: Gateway is a stateless microservice: Flight server (gRPC) → DuckDB/Iceberg backend. Stateless: all state is in the backend (database, Iceberg tables). Scalable: multiple gateway instances behind load balancer. Observable: logs principal, query, bytes, timestamp. Secure: JWT auth, role-based access, TLS everywhere.
+
+**Q2: Why is the gateway stateless? What's the benefit?**
+
+A: The gateway holds no data — it's a query router. All state is in the backend (DuckDB, Iceberg). Benefits: (1) horizontal scaling (add more gateway instances), (2) fault tolerance (any instance can serve any request), (3) rolling updates (replace instances without downtime), (4) simple deployment (standard microservice). The gateway is a proxy, not a database.
+
+**Q3: How does the gateway handle backend failures?**
+
+A: Options: (1) Return error to client (client retries), (2) Failover to read replica (if available), (3) Circuit breaker (stop sending requests to failed backend), (4) Cached responses (for read-heavy workloads). The gateway should be thin — let the backend handle resilience. The key: gateway is not a cache, it's a router.
+
+**Q4: How do you deploy multiple gateway instances?**
+
+A: Kubernetes Deployment with multiple replicas. Service: ClusterIP (internal) or LoadBalancer (external). HPA: scale based on CPU or connection count. Each instance connects to the same backend. Clients connect to any instance (stateless). Load balancer distributes requests. The key: gateway instances are interchangeable.
+
+**Q5: How do you handle gateway configuration across environments (dev, staging, prod)?**
+
+A: Use ConfigMaps (Kubernetes) or environment variables. Backend URLs, auth settings, rate limits vary by environment. Secrets (TLS certs, JWT keys) in Secrets (Kubernetes) or vault. The gateway reads config at startup. The key: config is external to the gateway code — same binary, different config.
+
+### Concept 2: Authentication and authorization
+
+**Q1: How does the JWT authentication flow work in Flight SQL?**
+
+A: (1) Client sends `authenticate` with credentials (user:password). (2) Server validates, issues JWT token. (3) Client stores token. (4) Every subsequent call includes token via `get_token()`. (5) Server validates token on every call via `is_valid()`. (6) Server extracts identity from token (`ctx.peer_identity()`). The token is short-lived (1 hour) and stateless (no server-side session).
+
+**Q2: How do you implement role-based access control?**
+
+A: Map roles to allowed operations: `svc_etl` → `do_put` only, `risk_analyst` → `get_flight_info` + `do_get` only. In the gateway: `def _require(ctx, verb): allowed = {"read": {"risk_analyst"}, "ingest": {"svc_etl"}}; user = ctx.peer_identity(); if user not in allowed[verb]: raise FlightUnauthorizedError`. The gateway enforces access at the protocol level.
+
+**Q3: How do you handle row-level security in Flight SQL?**
+
+A: The gateway doesn't do row-level security — the backend does. Options: (1) DuckDB views with WHERE clauses, (2) Iceberg row-level filters, (3) Catalog-level row policies. The gateway enforces column-level access (which tables/queries), the backend enforces row-level access (which rows). The key: don't put business logic in the gateway.
+
+**Q4: How do you audit data access in Flight SQL?**
+
+A: Log every call: `def get_flight_info(ctx, descriptor): log(ctx.peer_identity(), descriptor, timestamp)`. Store in audit table: principal, query, bytes served, timestamp. For regulators: query the audit table for the last 90 days. The gateway is the audit boundary — all access goes through it.
+
+**Q5: How do you handle token expiry and refresh?**
+
+A: Client detects 401/UNAUTHENTICATED error → re-authenticate → get new token. Or: client proactively refreshes before expiry (e.g., at 50 minutes for a 1-hour token). Server rejects expired tokens with `FlightUnauthenticatedError`. The key: tokens are short-lived (1 hour) to limit exposure if compromised.
+
+### Concept 3: Command envelopes and protocol
+
+**Q1: What are command envelopes, and why use JSON instead of protobuf?**
+
+A: Command envelopes encode the SQL command in the Flight descriptor. JSON: easy to debug, no codegen, runs with pyarrow alone. Protobuf: official Flight SQL spec, required for production clients (ADBC, JDBC). JSON is for development; protobuf is for production. The gateway can switch by changing the encoding function — semantics are identical.
+
+**Q2: How do you swap JSON envelopes for protobuf in production?**
+
+A: Replace `json.dumps({"sql": query})` with protobuf encoding from `flight_sql.proto`. Use ADBC Flight SQL driver for clients. The server implements the same FlightServerBase methods — just different encoding. The key: the gateway's logic (auth, query routing) doesn't change — only the wire format.
+
+**Q3: What's the difference between `do_get` and `do_put` in the gateway?**
+
+A: `do_put` = ingestion path (client uploads data to the gateway). `do_put` reads the client's Arrow batches and writes to the backend (DuckDB, Iceberg). `do_get` = query path (client queries the gateway). `do_get` executes SQL on the backend and streams Arrow batches to the client. Both use Arrow — zero serialization.
+
+**Q4: How does the gateway handle prepared statements?**
+
+A: (1) Client sends `CreatePreparedStatement` action with SQL. (2) Gateway stores SQL with an opaque handle. (3) Client binds parameters via `do_put`. (4) Client executes via `get_flight_info(CommandPreparedStatementQuery{handle})`. (5) Gateway executes with bound parameters. (6) Client closes via `ClosePreparedStatement`. Benefits: parse-once-run-many, injection safety.
+
+**Q5: How do you handle multi-statement transactions in Flight SQL?**
+
+A: Flight SQL supports `BeginTransaction` / `Commit` / `Rollback` actions. The gateway: (1) begins transaction on backend, (2) executes statements within transaction, (3) commits or rolls back. For DuckDB: single-writer, so transactions serialize. For Iceberg: atomic commits per operation. The key: transaction semantics come from the backend, not the gateway.
+
+### Concept 4: Serialization and performance
+
+**Q1: How do you benchmark the gateway's serialization overhead?**
+
+A: Measure: (1) `get_flight_info` latency (planning only, no data), (2) `do_get` latency (data streaming), (3) total end-to-end latency. Compare: Flight vs REST+JSON for the same query. Expected: Flight is 10-50× faster at the network boundary. The key: measure serialization separately from query execution.
+
+**Q2: What's the payload size difference between Arrow and JSON?**
+
+A: For 1M rows × 5 float columns: Arrow IPC ≈ 48 MB (raw binary), JSON ≈ 156 MB (text + field names + type markers). Ratio: 3.3×. For strings: worse (JSON escapes). For nested data: even worse (repeated structure). Arrow's binary layout is always more compact.
+
+**Q3: How does Flight handle concurrent queries?**
+
+A: Each query is an independent gRPC call. The gateway processes them concurrently (async/await or thread pool). The backend (DuckDB) handles concurrency via MVCC (single writer, many readers). For multiple writers: serialize writes or use Iceberg (optimistic concurrency). The key: gateway is stateless, backend handles concurrency.
+
+**Q4: How do you optimize gateway performance for high concurrency?**
+
+A: (1) Multiple gateway instances (horizontal scaling), (2) Connection pooling (reuse gRPC connections), (3) Batch size tuning (larger batches = fewer round trips), (4) Backend optimization (DuckDB memory limits, thread counts), (5) Caching (for repeated queries). The key: gateway is thin — optimize the backend.
+
+**Q5: How do you handle large result sets (100M+ rows) in Flight?**
+
+A: Flight streams RecordBatches incrementally (65K rows each). The client processes each batch as it arrives — constant memory. For 100M rows: ~1500 batches × 65K rows. The key: never materialize the full result. Use `reader.read_chunk()` in a loop, process each batch, discard. Memory stays flat regardless of result size.
+
+### Concept 5: Banking scenarios
+
+**Q1: How does the gateway handle a fraud attack (50 concurrent analysts)?**
+
+A: (1) Multiple gateway instances handle concurrent connections, (2) Each query streams Arrow batches (no JSON parsing), (3) Backend (DuckDB) processes queries in parallel (MVCC), (4) Total wait: 50 × 0.04s = 2s (vs 50 × 1.8s = 90s with REST). The key: Arrow's zero-parse advantage scales with concurrency — no CPU saturation.
+
+**Q2: How does the gateway handle a regulator's audit request?**
+
+A: Regulator queries the audit table (logged by the gateway): principal, query, bytes, timestamp. The gateway provides: (1) complete access trail, (2) reproducible results (same query → same data), (3) time travel for historical proof. The gateway is the audit boundary — all access goes through it.
+
+**Q3: How does the gateway handle a PCI-DSS audit?**
+
+A: Gateway logs: who accessed cardholder data, when, how much. Regulator queries: `SELECT * FROM audit_log WHERE table = 'card_txns' AND timestamp > NOW() - INTERVAL 90 DAY`. The gateway proves: (1) no raw PANs accessed (only masked), (2) access controlled (role-based), (3) complete audit trail. The gateway is the PCI-DSS boundary.
+
+**Q4: How does the gateway handle a data breach investigation?**
+
+A: (1) Query audit table for suspicious activity (unusual queries, after-hours access), (2) Trace principal → query → data accessed, (3) Verify: was data exfiltrated? (bytes served vs normal), (4) Time travel: what data was accessible at breach time? The gateway provides the forensic trail.
+
+**Q5: How does the gateway handle multi-region deployment?**
+
+A: Deploy gateway in each region (US, EU, Asia). Each gateway reads from the same Iceberg table (replicated via S3 cross-region replication). Clients connect to the nearest gateway. The key: Flight SQL is region-agnostic — the protocol works anywhere. The backend (Iceberg) handles replication.
+
+---
+
+## 6. Cheat sheet
 
 | Task | Code |
 |---|---|

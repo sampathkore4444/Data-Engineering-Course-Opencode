@@ -9,6 +9,20 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-concept-a-keyspace-not-a-filesystem) | Concept: a keyspace, not a filesystem |
+| [2](#2-banking-scenario-the-400-tb-migration) | Banking scenario: the 400 TB migration |
+| [3](#3-end-to-end-example) | End-to-end example |
+| [4](#4-what-just-happened-layer-by-layer) | What just happened, layer by layer |
+| [5](#5-production-notes-you-will-get-asked-in-interviews) | Production notes |
+| [6](#6-exercises) | Exercises |
+| [7](#7-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. Concept: a keyspace, not a filesystem
 
 Object storage exposes exactly three operations per object - PUT, GET, DELETE - plus LIST,
@@ -253,7 +267,123 @@ channel     n      vol
 5. Point `pafs.S3FileSystem` at a real MinIO container (`docker run minio/minio`) instead of
    moto and re-run unchanged - that portability *is* the S3 contract.
 
-## 7. Cheat sheet
+---
+
+## 7. Interview questions: object storage and data lakes
+
+### Concept 1: Object storage fundamentals
+
+**Q1: What's the difference between object storage and file storage?**
+
+A: File storage (NFS, local disk): hierarchical directories, `rename()`, `append()`, `readdir()`. Object storage (S3): flat keyspace, PUT/GET/DELETE only, no rename, no append. Object storage is: (1) scalable (petabytes), (2) durable (11 9s), (3) cheap ($0.02/GB/month), (4) REST API only. The trade-off: no file system semantics, but massive scale.
+
+**Q2: Why can't you rename objects in S3?**
+
+A: S3 is a flat keyspace — keys are immutable identifiers. "Rename" is actually: (1) PUT new object, (2) DELETE old object. This is expensive (2 operations) and non-atomic (crash between puts = duplicate). The key: object storage is append-only by design. Use Iceberg's metadata layer for atomic operations.
+
+**Q3: How does S3 achieve 11 9s durability?**
+
+A: S3 stores each object across 3 Availability Zones (AZs). Each AZ has multiple disks. The math: 1 - (failure probability)^3 = 1 - (10^-11)^3 ≈ 11 9s. The key: redundancy, not backup. S3 is the storage layer — Iceberg provides the metadata layer for consistency.
+
+**Q4: What's the S3 consistency model?**
+
+A: S3 is strongly consistent for PUT-after-PUT and GET-after-PUT (since 2020). This means: if you PUT an object, subsequent GETs see the new version. This is critical for Iceberg: atomic catalog swaps rely on consistent reads. Before 2020, S3 was eventually consistent — Iceberg had to handle this.
+
+**Q5: How do you estimate S3 storage costs for a 100 TB data lake?**
+
+A: S3 Standard: $0.023/GB/month × 100,000 GB = $2,300/month. S3 Intelligent-Tiering: auto-moves data between tiers, saves 30-40%. S3 Glacier: $0.004/GB/month for archival. Plus: PUT/GET requests ($0.005/1000), data transfer ($0.09/GB out). Total: ~$2,500-$3,000/month for 100 TB.
+
+### Concept 2: DuckDB and S3
+
+**Q1: How does DuckDB query Parquet files on S3 without downloading them?**
+
+A: DuckDB uses the `httpfs` extension: `INSTALL httpfs; LOAD httpfs; SELECT count(*) FROM 's3://bucket/txns/**/*.parquet'`. DuckDB fetches only the Parquet pages it needs (HTTP Range requests). No full download — just metadata (footer) and needed data pages. The key: DuckDB does random access via HTTP, not sequential download.
+
+**Q2: What's the performance difference between local Parquet and S3 Parquet?**
+
+A: Local: ~0.1s per file (SSD I/O). S3: ~0.5-2s per file (network latency + S3 request overhead). For 1000 files: local = 100s, S3 = 500-2000s. The key: S3 is slower per file, but parallelism helps (DuckDB reads files concurrently). For filtered queries: S3 is fine (skip most files). For full scans: local is faster.
+
+**Q3: How does DuckDB handle S3 listing (thousands of files)?**
+
+A: DuckDB uses S3 LIST API (prefix scan). For 10,000 files: LIST returns 10,000 keys (paginated, 1000 per page = 10 requests). The key: LIST is expensive on S3 (request fees, latency). Iceberg solves this: catalog stores file list, no LIST needed. DuckDB reads Iceberg metadata, not S3 LIST.
+
+**Q4: How do you optimize DuckDB queries over S3?**
+
+A: (1) Partition pruning: filter on partition columns (skip directories), (2) Predicate pushdown: filter on data columns (skip row groups), (3) Parallelism: read files concurrently, (4) Caching: DuckDB caches Parquet metadata, (5) File size: larger files = fewer requests. The key: minimize S3 requests.
+
+**Q5: How do you handle S3 throttling (503 Slow Down)?**
+
+A: S3 throttles at 5,500 GET requests per second per prefix. Solutions: (1) Spread files across prefixes (hash-based partitioning), (2) Use larger files (fewer requests), (3) Implement retry with exponential backoff, (4) Use S3 Transfer Acceleration. The key: design your key structure to avoid hot prefixes.
+
+### Concept 3: Data lake design
+
+**Q1: How do you organize a data lake on S3?**
+
+A: Pattern: `s3://lake/{database}/{table}/{partition_column}={value}/data.parquet`. Example: `s3://meridian/bank/card_txns/date=2026-07-15/0001.parquet`. Key design: (1) Table-level prefix (isolation), (2) Partition columns (pruning), (3) Consistent naming (predictable paths). The key: organize by access pattern, not by source system.
+
+**Q2: What's the small-file problem on S3, and how do you solve it?**
+
+A: Small files (< 1MB) cause: (1) S3 LIST overhead (thousands of keys), (2) Per-request fees ($0.005/1000), (3) DuckDB planning overhead (many metadata reads). Solution: Iceberg compaction (merge small files into 128-512MB files). The key: object storage is optimized for large objects, not millions of tiny ones.
+
+**Q3: How do you handle schema changes in a data lake?**
+
+A: Iceberg schema evolution: add/rename/drop columns without rewriting data. Field IDs make this safe across engines. Old readers see NULLs for new columns. New readers see all columns. The key: Iceberg's metadata layer handles schema changes — S3 doesn't care about schemas.
+
+**Q4: How do you handle data retention on S3?**
+
+A: (1) Iceberg `expire_snapshots`: remove metadata references to old data files, (2) S3 Lifecycle rules: auto-delete objects after N days (only for orphaned files), (3) Tags: exempt audit-pinned snapshots from expiry. The key: never use S3 Lifecycle on live Iceberg tables — it corrupts metadata.
+
+**Q5: How do you handle cross-region replication for DR?**
+
+A: (1) S3 Cross-Region Replication (CRR): auto-replicate objects to another region, (2) Iceberg catalog replication: sync catalog metadata to DR region, (3) DNS failover: point gateway to DR region. The key: S3 CRR handles data replication; Iceberg metadata is small (replicate separately).
+
+### Concept 4: Production patterns
+
+**Q1: How do you monitor a data lake on S3?**
+
+A: Track: (1) Object count and size per table, (2) File size distribution (detect small files), (3) S3 request rates (detect throttling), (4) Query latency (DuckDB over S3). Alert on: small files > threshold, request rate > 80% of limit, query latency > 2× baseline. The key: S3 metrics + Iceberg metadata.
+
+**Q2: How do you handle S3 costs in production?**
+
+A: (1) S3 Intelligent-Tiering (auto-optimize storage class), (2) Lifecycle rules (delete orphans, archive expired snapshots), (3) Large files (reduce request fees), (4) Compression (Parquet + ZSTD reduces storage), (5) Partitioning (skip irrelevant data). The key: storage is cheap, but requests and transfer add up.
+
+**Q3: How do you handle S3 security?**
+
+A: (1) IAM roles (least privilege), (2) Bucket policies (restrict access), (3) VPC endpoints (no public internet), (4) Encryption at rest (SSE-S3 or SSE-KMS), (5) Encryption in transit (TLS), (6) Access logging (CloudTrail). The key: S3 security is IAM + bucket policies + encryption.
+
+**Q4: How do you handle S3 performance?**
+
+A: (1) Parallel requests (DuckDB reads files concurrently), (2) Larger files (fewer requests), (3) Prefix distribution (avoid hot prefixes), (4) S3 Transfer Acceleration (cross-region), (5) S3 Select (filter at S3, not client). The key: S3 is optimized for throughput, not latency. Design for parallelism.
+
+**Q5: How do you handle S3 failures?**
+
+A: (1) Retry with exponential backoff (transient failures), (2) Checksums (detect corruption), (3) Multi-part upload (resume large uploads), (4) S3 Versioning (recover from deletes), (5) Cross-region replication (DR). The key: S3 is highly available (11 9s durability), but transient failures happen — retry logic is essential.
+
+### Concept 5: Interview preparation
+
+**Q1: How do you explain object storage to a database engineer?**
+
+A: "Object storage is like a key-value store for files. You PUT a blob with a key, GET it back by key, DELETE it. No directories, no rename, no append. It's like a distributed hash table for files — scalable, durable, cheap. The trade-off: no file system semantics, but massive scale."
+
+**Q2: What's the most common mistake when designing a data lake on S3?**
+
+A: (1) Too many small files (creates LIST overhead, request fees), (2) Wrong partitioning (too many partitions = too many directories), (3) No compaction (small files accumulate), (4) Using S3 Lifecycle on live tables (corrupts Iceberg metadata). The key: design for large files and few partitions.
+
+**Q3: How do you justify moving from on-prem HDFS to S3?**
+
+A: (1) Cost: S3 is 10× cheaper than HDFS (no cluster to manage), (2) Durability: S3 has 11 9s (HDFS has 3 replicas), (3) Scalability: S3 is unlimited (HDFS requires capacity planning), (4) Serverless: no ops overhead (HDFS requires admin). The key: S3 is storage-as-a-service — pay for what you use.
+
+**Q4: How do you handle a 400 TB migration from HDFS to S3?**
+
+A: (1) AWS DataSync or S3 Transfer Acceleration (bulk transfer), (2) Iceberg `add_files` (register existing files without copy), (3) Validate: query both, compare results, (4) Cutover: switch readers to S3, (5) Decommission: shut down HDFS. The key: `add_files` avoids rewriting petabytes.
+
+**Q5: What's the future of object storage in data engineering?**
+
+A: (1) S3-compatible storage everywhere (MinIO, Ceph, GCS), (2) Table formats (Iceberg) over object storage, (3) Serverless query (DuckDB, Trino) over S3, (4) Multi-cloud (same data, different clouds). The key: object storage is the foundation — table formats and query engines are the layers on top.
+
+---
+
+## 8. Cheat sheet
 
 | Task | Tool |
 |---|---|

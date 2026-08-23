@@ -8,6 +8,22 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-concept-the-operational-lifecycle) | Concept: the operational lifecycle |
+| [2](#2-banking-scenario-the-audit-drill) | Banking scenario: the audit drill |
+| [2.1](#21-real-world-banking-scenario-the-three-tickets-without-vs-with-iceberg) | Real-world: three tickets (WITHOUT vs WITH Iceberg) |
+| [3](#3-end-to-end-example) | End-to-end example |
+| [4](#4-what-each-operation-did-to-the-metadata-tree) | What each operation did to the metadata tree |
+| [5](#5-production-notes-you-will-get-asked-in-interviews) | Production notes |
+| [6](#6-gdpr-cascading-deletes-the-full-story) | GDPR cascading deletes |
+| [7](#7-exercises) | Exercises |
+| [8](#8-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. Concept: the operational lifecycle
 
 ```
@@ -464,7 +480,123 @@ table.manage_snapshots().remove_orphan_files(
 5. Set up a cron-style script skeleton that nightly: compacts, expires 7-day-old snapshots,
    and logs table metrics as JSON for monitoring.
 
-## 8. Cheat sheet
+---
+
+## 8. Interview questions: Iceberg operations in banking
+
+### Concept 1: Operational lifecycle
+
+**Q1: What's the recommended maintenance cadence for an Iceberg table with streaming ingest?**
+
+A: Every minute-hour: append micro-batches (ingest latency). Nightly: `rewrite_data_files` (bin-pack small files), `expire_snapshots` (bound metadata growth, keep 7+ days). Weekly: `remove_orphan_files` (reclaim crashed-writer leaks, 72h safety window). Quarterly: partition-spec review (keep pruning effective). The cadence balances freshness, performance, and storage cost.
+
+**Q2: How do you handle a streaming writer that crashes mid-commit?**
+
+A: Iceberg's atomic commit ensures the table stays consistent — the failed commit is invisible. The crashed writer's partially-written data files become orphans. The weekly `remove_orphan_files` job cleans them up (with 72h safety window to avoid deleting in-use files). No manual intervention needed — the metadata layer protects the table.
+
+**Q3: What happens if you don't compact an Iceberg table?**
+
+A: Small files accumulate → metadata bloat (thousands of manifest entries) → query planning slows (scanning manifests takes minutes) → data file scanning slows (many small I/O operations). The table still works, but performance degrades. Nightly compaction is essential for production tables with streaming ingest.
+
+**Q4: How do you monitor Iceberg table health?**
+
+A: Track: (1) file count (should stay stable after compaction), (2) snapshot count (should stay bounded after expiry), (3) manifest count (should stay low after compaction), (4) query latency (should stay stable). Log these metrics nightly. Alert on: file count > 10K, snapshot count > 100, query latency > 2× baseline.
+
+**Q5: How do you handle Iceberg tables with both streaming and batch writers?**
+
+A: Streaming writer appends micro-batches (frequent, small commits). Batch writer overwrites daily aggregates (less frequent, large commits). Conflict risk: low if they write to different partitions. If same partition: batch writer should wait for streaming to finish, or use partition-level commits. The key: minimize write contention on hot partitions.
+
+### Concept 2: Compaction and maintenance
+
+**Q1: What's the difference between bin-pack and sort-merge compaction?**
+
+A: Bin-pack: merge small files to target size (~512MB), no reordering. Fast, default choice. Sort-merge: bin-pack + sort by key (e.g., card_id). Better for time-series range queries (sorted data compresses better, range scans skip fewer pages). Choose bin-pack for general use, sort-merge for time-series or high-filter queries.
+
+**Q2: How do you choose the target file size for compaction?**
+
+A: Rule of thumb: 128MB-512MB per file. Smaller files: more parallelism (more files to read in parallel), but more metadata overhead. Larger files: less metadata, but less parallelism. For DuckDB (single-node): 128MB-256MB. For Spark (distributed): 256MB-512MB. The sweet spot balances I/O parallelism with metadata overhead.
+
+**Q3: When should you NOT compact?**
+
+A: Don't compact: (1) during quarter-end freezes (regulatory risk), (2) when active queries are running (compaction rewrites files, readers may see intermediate state), (3) right after GDPR deletes (wait for expiry first), (4) if storage is cheap and queries are fast enough. Compaction is maintenance, not a requirement — do it when performance degrades.
+
+**Q4: How does compaction interact with time travel?**
+
+A: Compaction replaces old data files with new ones. Old snapshots still reference the old files. As long as old snapshots exist (not expired), the old files are retained. After expiry, old files become orphans and are removed. Key: compaction doesn't break time travel — it just adds new files while old ones age out.
+
+**Q5: What's the difference between `rewrite_data_files` and `rewrite_manifests`?**
+
+A: `rewrite_data_files` merges small Parquet files into larger ones (bin-pack). `rewrite_manifests` consolidates fragmented manifests into fewer manifests (reduces metadata overhead). Both improve query performance: data-file compaction reduces I/O, manifest compaction reduces planning time. Do both in nightly maintenance.
+
+### Concept 3: GDPR and data retention
+
+**Q1: How do you handle GDPR "right to erasure" in a lakehouse?**
+
+A: (1) Identify all card_ids for the customer. (2) DELETE from each table (Silver, Gold). (3) Archive pre-deletion data to compliance table (regulatory hold, 7+ years). (4) Tag pre-deletion snapshot (never expires). (5) Compact affected partitions. (6) Log the operation. The paradox: GDPR says erase; banking regulations say retain. Solution: anonymize in analytical layer, retain in audit archive.
+
+**Q2: What's the data retention schedule for banking data?**
+
+A: Raw events (Bronze): 30-90 days. Validated transactions (Silver): 5-7 years. Fraud features (Gold): 2-3 years. Customer PII: until GDPR erasure + 30-day grace. Regulatory aggregates: 10+ years (Basel III, SOX). Audit snapshots: indefinite (tagged, exempt from expiry). Iceberg metadata: matches data retention.
+
+**Q3: How do you prove GDPR compliance to an auditor?**
+
+A: Show: (1) pre-deletion snapshot ID (data existed), (2) post-deletion snapshot ID (data removed), (3) archive table (data retained for regulatory hold), (4) tagged snapshot (never expires), (5) audit log (timestamp, principal, operation). The proof is reproducible: anyone can query the snapshots and verify. Iceberg's time travel makes this possible.
+
+**Q4: How do you handle a regulatory request for data that was deleted 2 years ago?**
+
+A: If the pre-deletion snapshot was tagged (never expired), time travel to it: `SELECT * FROM txns VERSION AS OF tag_pre_gdpr_C88412`. If the snapshot was expired, check the compliance archive table (retains data for 7+ years). If neither exists, the data is truly gone — but this shouldn't happen if retention policies are followed.
+
+**Q5: How do you balance GDPR erasure with regulatory retention?**
+
+A: The pattern: (1) Delete from active tables (GDPR compliance). (2) Archive to compliance-restricted table (regulatory retention). (3) Tag pre-deletion snapshot (audit trail). (4) Compliance table has restricted access (PCI-DSS: no raw PAN). (5) Retention schedule: 7+ years for transaction records. This satisfies both: GDPR (data erased from active tables) and regulators (data retained in archive).
+
+### Concept 4: Branches, tags, and rollback
+
+**Q1: What's the difference between a branch and a tag in Iceberg?**
+
+A: A tag is an immutable pointer to one snapshot (e.g., `audit_2026Q2` → snapshot 5192). It never moves. A branch is a movable pointer (e.g., `main` moves with each commit). Tags are for audit pins (retention jobs must skip them). Branches are for development (stage a release, validate, then fast-forward). Rollback moves `main` without editing history.
+
+**Q2: How do you rollback a bad write in Iceberg?**
+
+A: `table.manage_snapshots().rollback_to_snapshot(good_snapshot_id).commit()`. This moves `main` to the good snapshot. History is never edited — old snapshots remain. The bad snapshot still exists (for audit). The key: rollback is atomic (one pointer swap) and safe (history preserved).
+
+**Q3: How do you use branches for release trains?**
+
+A: Create branch: `table.manage_snapshots().create_branch("release/2026Q3", snapshot_id)`. Append data to the branch. Validate with queries. When ready: fast-forward `main` to the branch's snapshot. If problems: delete the branch (no impact on `main`). This isolates risky changes from production.
+
+**Q4: What happens if you delete a tagged snapshot?**
+
+A: You can't — tags are immutable. The tag persists until explicitly removed. Retention jobs must check tags before expiring snapshots. If a tag points to a snapshot, that snapshot (and its data files) are retained. This is how audit pins work: tagged snapshots are exempt from expiry.
+
+**Q5: How do you handle a schema migration that breaks downstream systems?**
+
+A: (1) Create a branch with the new schema. (2) Append data with new columns. (3) Test downstream systems against the branch. (4) When ready, fast-forward `main`. If problems: delete the branch, `main` is unaffected. The key: branches isolate schema changes from production.
+
+### Concept 5: Production patterns
+
+**Q1: How do you handle concurrent commits to the same Iceberg table?**
+
+A: Iceberg uses optimistic concurrency: both writers prepare manifests independently. At commit time, one succeeds, the other fails (catalog swap conflict). The failed writer retries from the fresh snapshot. For high-throughput: use partition-level commits (each partition is independent). For conflicting updates: serialize writes or use a queue.
+
+**Q2: How do you choose between CoW and MoR for a banking table?**
+
+A: CoW: rewrite affected files on delete/update. Fast reads, slow writes. Choose for: regulatory marts (reads dominate), compliance tables (fast scans needed). MoR: append delete files. Fast writes, slower reads (merge at scan). Choose for: streaming ingest (writes dominate), high-frequency updates (card corrections). Most tables: MoR + nightly compaction.
+
+**Q3: How do you handle Iceberg tables with both Spark and DuckDB?**
+
+A: Both read the same Iceberg table via the same catalog. Spark writes (distributed, handles large data). DuckDB reads (fast, interactive). The key: Iceberg is engine-neutral. Spark implements the table format spec. DuckDB implements it. The catalog ensures everyone sees the same metadata. No vendor lock-in.
+
+**Q4: How do you handle Iceberg in a multi-cloud environment?**
+
+A: Use a REST catalog (Polaris/Unity/Lagom) that works across clouds. Data lives in S3 (AWS), GCS (GCP), or ADLS (Azure). Iceberg's metadata is cloud-agnostic (just files). The catalog provides a unified view across clouds. The key: Iceberg's open spec works anywhere — the catalog is the abstraction layer.
+
+**Q5: How do you migrate from plain Parquet to Iceberg?**
+
+A: (1) Create Iceberg table with same schema. (2) Use `add_files` API to register existing Parquet files (no data copy). (3) Validate with queries. (4) Switch readers to Iceberg table. (5) Old Parquet files become orphans (clean up later). The key: `add_files` avoids rewriting petabytes — you're just adding metadata pointers to existing files.
+
+---
+
+## 9. Cheat sheet
 
 | Task | PyIceberg |
 |---|---|

@@ -5,6 +5,22 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-the-serialization-problem-one-page-summary) | The Serialization Problem: One-Page Summary |
+| [2](#2-all-beforeafter-scenarios-summary) | All BEFORE/AFTER Scenarios: Summary |
+| [3](#3-all-benchmarks-consolidated-results) | All Benchmarks: Consolidated Results |
+| [4](#4-where-serialization-hides-diagnostic-checklist) | Where Serialization Hides: Diagnostic Checklist |
+| [5](#5-decision-guide-when-to-use-what) | Decision Guide: When to Use What |
+| [6](#6-common-pitfalls-and-how-to-avoid-them) | Common Pitfalls and How to Avoid Them |
+| [7](#7-quick-reference-code-snippets) | Quick Reference: Code Snippets |
+| [8](#8-performance-cheat-sheet) | Performance Cheat Sheet |
+| [9](#9-interview-questions--answers) | Interview Questions & Answers |
+
+---
+
 ## 1. The Serialization Problem: One-Page Summary
 
 Every system boundary forces a **serialize → transmit → deserialize** cycle:
@@ -366,6 +382,28 @@ A: Passing data between systems without creating copies. Arrow's C Data Interfac
 
 **Q: How do I know if my pipeline has serialization overhead?**
 A: Count `to_*()`, `read_*()`, `json.dumps()`, `pickle.dump()` calls. Each is a boundary. Profile with `time.perf_counter()` around each call. If serialization > 30% of runtime, optimize.
+
+### Advanced questions
+
+**Q1: A bank processes 2M rows/day. The CSV+JSON pipeline takes 8 seconds. How do you prove Arrow's value?**
+
+A: Benchmark both paths: (1) CSV→pandas→JSON→pandas→Parquet (current), (2) Parquet→Arrow→IPC→Arrow→Parquet (Arrow). Measure: wall time, peak RAM, CPU usage. Expected: Arrow path 10-20× faster, 3× less RAM. Present: "Arrow saves 7 seconds/batch × 365 days = 42 minutes/year of CPU. Plus: faster fraud alerts, less CPU contention."
+
+**Q2: How do you convince management to adopt Arrow when the current system "works"?**
+
+A: Quantify the cost of "working": (1) Developer time maintaining serialization glue code (hours/week), (2) Latency impacting fraud detection (delayed alerts = card losses), (3) RAM overhead (bigger machines = higher cloud bills), (4) Cross-team friction (Python vs Java format wars). Arrow eliminates all four. Present: "Arrow isn't a rewrite — it's removing code, not adding it."
+
+**Q3: How do you handle Arrow's memory overhead when processing 100 GB datasets on a 32 GB machine?**
+
+A: Use RecordBatch streaming: process 65K-row batches (a few MB each), not the entire table. Arrow's ChunkedArray supports this natively. DuckDB streams batches via `to_arrow_reader(4096)`. Flight streams batches via `do_get()`. The key: never materialize the full dataset — stream, process, and write incrementally.
+
+**Q4: A regulatory audit asks "prove the data wasn't altered during transfer." How does Arrow help?**
+
+A: Arrow's immutability guarantee: once built, arrays are read-only. IPC files are self-describing (schema + buffers). Hash the Arrow buffers before/after transfer — identical hashes prove no alteration. Compare to JSON: text encoding can change (whitespace, key order), making hash verification unreliable. Arrow's binary layout is deterministic.
+
+**Q5: How do you handle serialization in a multi-language environment (Python + Java + R)?**
+
+A: Arrow is the common format: Python (pyarrow), Java (arrow-java), R (arrow-r). All share the same buffer layout via C Data Interface. Data moves: Python → Arrow IPC → Java (zero-copy). No JSON/protobuf encoding. The key: Arrow is the universal serialization format — one layout, 20+ languages.
 
 ---
 

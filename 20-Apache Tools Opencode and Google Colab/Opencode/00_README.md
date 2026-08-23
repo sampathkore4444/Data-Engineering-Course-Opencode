@@ -2,6 +2,30 @@
 
 ### Columnar Storage · Apache Parquet · Apache Arrow · DuckDB · Apache Iceberg · Apache Flight SQL · Lakehouse Architecture · S3 Object Storage · Apache Spark
 
+---
+
+## Table of Contents
+
+| # | Lesson | Topic |
+|---|---|---|
+| 00 | [`00_README.md`](00_README.md) | Course overview and learning path |
+| 01 | [`01_columnar_storage_fundamentals.md`](01_columnar_storage_fundamentals.md) | Row vs column storage, encodings, compression |
+| 02 | [`02_parquet_file_format.md`](02_parquet_file_format.md) | Parquet internals, predicate pushdown, partitioning |
+| 03 | [`03_arrow_in_memory_format.md`](03_arrow_in_memory_format.md) | Arrow memory model, zero-copy, serialization benchmarks |
+| 04 | [`04_pyarrow_hands_on_lab.md`](04_pyarrow_hands_on_lab.md) | PyArrow in practice, compute kernels, datasets API |
+| 05 | [`05_duckdb_analytical_engine.md`](05_duckdb_analytical_engine.md) | DuckDB SQL, vectorized execution, Arrow interchange |
+| 06 | [`06_iceberg_table_format.md`](06_iceberg_table_format.md) | Iceberg ACID, time travel, schema evolution, GDPR |
+| 07 | [`07_iceberg_hands_on_lab.md`](07_iceberg_hands_on_lab.md) | Iceberg operations: upserts, compaction, maintenance |
+| 08 | [`08_flight_sql_protocol.md`](08_flight_sql_protocol.md) | Flight SQL protocol, gRPC, serialization analysis |
+| 09 | [`09_flight_sql_hands_on_lab.md`](09_flight_sql_hands_on_lab.md) | Flight SQL gateway: auth, roles, ingestion, streaming |
+| 10 | [`10_lakehouse_architecture.md`](10_lakehouse_architecture.md) | Medallion architecture, catalogs, governance |
+| 11 | [`11_capstone_banking_project.md`](11_capstone_banking_project.md) | End-to-end capstone: ingest → serve |
+| 12 | [`12_object_storage_data_lake.md`](12_object_storage_data_lake.md) | S3 object storage, DuckDB httpfs |
+| 13 | [`13_spark_distributed_analytics.md`](13_spark_distributed_analytics.md) | Apache Spark: distributed analytics at scale |
+| 14 | [`14_serialization_reference_guide.md`](14_serialization_reference_guide.md) | Serialization reference: benchmarks, decision guide |
+
+---
+
 > A complete course built around **real-world banking scenarios** with runnable **Python code**.
 >
 > Tested with: Python 3.12, `pyarrow 25.x`, `pandas`, `duckdb 1.5.x`.

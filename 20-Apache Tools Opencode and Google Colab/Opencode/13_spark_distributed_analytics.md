@@ -8,6 +8,22 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-concept-cluster-computing-without-the-cluster-mystique) | Concept: cluster computing |
+| [2](#2-banking-scenario-velocity-features-at-scale) | Banking scenario: velocity features at scale |
+| [3](#3-end-to-end-example) | End-to-end example |
+| [4](#4-reading-the-physical-plan-like-a-senior-engineer) | Reading the physical plan |
+| [5](#5-production-notes-you-will-get-asked-in-interviews) | Production notes |
+| [5.5](#55-proving-it-spark-vs-duckdb-serialization-costs) | Spark vs DuckDB serialization costs |
+| [6](#6-duckdb-vs-spark-the-complete-decision-matrix) | DuckDB vs Spark decision matrix |
+| [7](#7-exercises) | Exercises |
+| [8](#8-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. Concept: cluster computing without the cluster mystique
 
 A Spark job is a **lazy plan** that a *driver* builds and *executors* execute in parallel
@@ -601,7 +617,123 @@ HAVING count(*) >= 5;
     dashboard queries. Measure the full latency: Spark write + DuckDB read. Is this
     faster than doing everything in Spark?
 
-## 8. Cheat sheet
+---
+
+## 8. Interview questions: Spark in banking
+
+### Concept 1: Spark architecture
+
+**Q1: Explain Spark's lazy evaluation model. Why is this important for performance?**
+
+A: Spark builds a DAG of transformations (filter, map, groupBy) but doesn't execute until an action (count, show, write) is called. Benefits: (1) Catalyst optimizer can rewrite the plan, (2) whole-stage codegen fuses operators, (3) shuffle optimization (coalesce partitions). Without lazy evaluation: each transformation would execute immediately, no optimization opportunity.
+
+**Q2: What's the difference between a transformation and an action in Spark?**
+
+A: Transformation: lazy, builds DAG (filter, map, groupBy, join). Action: triggers execution, returns result (count, collect, write, show). Example: `df.filter(...).groupBy(...).agg(...)` = transformations (lazy). `.count()` = action (triggers execution). The key: transformations are free until an action runs.
+
+**Q3: How does Spark's shuffle work, and why is it expensive?**
+
+A: Shuffle redistributes data across partitions (e.g., groupBy, join). Each executor writes its partition to disk (shuffle file), then other executors read the relevant shuffle files. Cost: (1) disk I/O (write + read), (2) network I/O (data transfer), (3) serialization (data format conversion). The key: minimize shuffles (use partitioning, bucketing).
+
+**Q4: What's the difference between `local[N]` and a real cluster?**
+
+A: `local[N]`: single JVM, N threads simulate executors. Real cluster: multiple JVMs (executors) on multiple machines. Local mode: no network, no shuffle (same JVM), fast startup. Cluster mode: network shuffle, distributed data, slower startup. The key: local mode is for development; cluster mode is for production.
+
+**Q5: How does Spark handle data skew?**
+
+A: Data skew: one partition has 10× more data than others (e.g., one merchant has 30% of transactions). Symptoms: one task takes 10× longer. Solutions: (1) AQE skew-join handling (auto-splits skewed partitions), (2) Salting (add random prefix to keys, aggregate, then remove prefix), (3) Broadcast join (for small tables). The key: detect via Spark UI task times.
+
+### Concept 2: Spark SQL and DataFrames
+
+**Q1: What's the difference between Spark SQL and DataFrame API?**
+
+A: Spark SQL: SQL strings (`spark.sql("SELECT ...")`). DataFrame API: method chains (`df.filter(...).groupBy(...).agg(...)`). Both produce the same Catalyst plan. SQL is better for: complex queries, SQL-savvy teams. DataFrame API is better for: programmatic transforms, type safety. The key: same performance, different syntax.
+
+**Q2: How does Catalyst optimize Spark queries?**
+
+A: Catalyst: (1) Parse SQL/DataFrame → logical plan, (2) Optimize (predicate pushdown, projection pruning, join reordering), (3) Generate physical plan (Whole-Stage Codegen), (4) Compile to Tungsten bytecode. The key: Catalyst optimizes across the entire query, not just individual operators.
+
+**Q3: What's predicate pushdown in Spark, and how do you verify it?**
+
+A: Predicate pushdown: filters travel into the scan (Parquet reader skips row groups). Verify: `df.explain(mode="formatted")` — look for `PushedFilters` in the scan node. Example: `PushedFilters: [IsNotNull(amount), GreaterThan(amount,400.0)]`. The key: if filters aren't pushed, you're reading too much data.
+
+**Q4: How do you write optimized Spark SQL for banking analytics?**
+
+A: (1) Use partition pruning (filter on partition columns), (2) Use predicate pushdown (filter early), (3) Avoid SELECT * (projection pushdown), (4) Use broadcast joins for small tables, (5) Tune shuffle partitions (`spark.sql.shuffle.partitions`). The key: Spark optimizes automatically, but you must give it the right hints.
+
+**Q5: How do you handle Spark SQL with Iceberg tables?**
+
+A: Spark reads Iceberg natively: `spark.sql("SELECT * FROM iceberg_table WHERE ts >= '2026-07-15'")`. Spark pushes predicates into Iceberg (partition pruning + manifest pruning). Spark writes Iceberg: atomic commits, time travel, schema evolution. The key: Spark and Iceberg are tightly integrated.
+
+### Concept 3: Serialization and interop
+
+**Q1: Why is Spark 31× slower than DuckDB for single-node queries?**
+
+A: Spark overhead: JVM startup (~2s), Parquet read (JVM bridge), shuffle (disk I/O), driver collection (JVM → Python pickle). DuckDB: in-process, no JVM, direct Parquet scan, zero-copy Arrow. The key: Spark's distribution overhead is unjustified for single-node data. Use Spark when data exceeds one machine's RAM.
+
+**Q2: How does the Arrow bridge improve Spark→Python serialization?**
+
+A: Enable: `spark.sql.execution.arrow.pyspark.enabled=true`. Instead of pickle (JVM → Python objects → DataFrame), Spark uses Arrow IPC (JVM → Arrow buffers → pandas). Speedup: ~5×. The key: Arrow eliminates Python object creation — data stays in binary format.
+
+**Q3: How do you read Spark output with DuckDB?**
+
+A: Spark writes Parquet files. DuckDB reads them: `con.sql("SELECT * FROM read_parquet('s3://output/**/*.parquet')")`. Zero-copy: DuckDB scans Parquet directly. The key: Parquet is the contract — Spark writes, DuckDB reads, no conversion needed.
+
+**Q4: How do you handle Spark DataFrame → pandas DataFrame conversion?**
+
+A: `df.toPandas()`. Without Arrow: JVM → pickle → pandas (slow, ~0.5s for 300K rows). With Arrow: JVM → Arrow IPC → pandas (fast, ~0.095s). The key: always enable Arrow optimization for pandas conversion.
+
+**Q5: How do you handle Spark DataFrame → Arrow Table conversion?**
+
+A: `df.toArrow()` returns Arrow Table directly (if Arrow optimization enabled). Or: `df.toPandas(dtype_backend="pyarrow")` returns pandas with Arrow-backed dtypes. The key: Arrow is the intermediate format — Spark and pandas both speak it.
+
+### Concept 4: Performance tuning
+
+**Q1: How do you tune Spark shuffle partitions?**
+
+A: Default: 200 (often wrong). Rule of thumb: `num_partitions = data_size / target_partition_size`. Target: 128MB-256MB per partition. For 10GB data: 10GB / 200MB = 50 partitions. Enable AQE: `spark.sql.adaptive.enabled=true` (auto-coalesces at runtime). The key: tune partitions to match data size.
+
+**Q2: What's Adaptive Query Execution (AQE), and why does it matter?**
+
+A: AQE: runtime optimization based on actual data statistics. Benefits: (1) auto-coalesce shuffle partitions, (2) auto-convert sort-merge join to broadcast join, (3) handle skew automatically. Enable: `spark.sql.adaptive.enabled=true` (default in Spark 3.x). The key: AQE fixes planning mistakes at runtime.
+
+**Q3: How do you handle Spark memory issues (OOM)?**
+
+A: (1) Increase executor memory (`spark.executor.memory=4g`), (2) Increase driver memory (`spark.driver.memory=2g`), (3) Tune shuffle partitions (smaller partitions = less memory per task), (4) Use Kryo serialization (`spark.serializer=org.apache.spark.serializer.KryoSerializer`), (5) Avoid collect() on large DataFrames. The key: OOM is usually shuffle-related.
+
+**Q4: How do you optimize Spark for banking window functions?**
+
+A: (1) Use RANGE frames (not ROWS) for time-based windows, (2) Partition by card_id (co-locate card's data), (3) Order by timestamp (sorted data = faster window), (4) Tune shuffle partitions (one partition per card's data). The key: window functions are expensive — minimize data movement.
+
+**Q5: How do you monitor Spark job performance?**
+
+A: Spark UI: (1) Stages tab (task times, shuffle read/write), (2) SQL tab (query plan, pushdown), (3) Executors tab (memory, GC). Metrics: task duration variance (skew), shuffle size (data movement), GC time (memory pressure). Alert on: task > 5× median, shuffle > 10GB, GC > 10%.
+
+### Concept 5: DuckDB vs Spark
+
+**Q1: When should you use DuckDB vs Spark?**
+
+A: DuckDB: data fits on one machine (< 100GB RAM), query < 5 minutes, interactive/ad-hoc, no cluster needed. Spark: data exceeds one machine's RAM, multi-hour batch ETL, existing cluster, distributed window functions over billions of rows. Rule: try DuckDB first, graduate to Spark when it hits limits.
+
+**Q2: How do you port a DuckDB query to Spark?**
+
+A: 90% identical. Differences: (1) INTERVAL syntax, (2) Window frames, (3) GROUP BY ALL (both support), (4) QUALIFY (both support). The core SQL is identical. The key: same storage (Parquet), different compute — queries port easily.
+
+**Q3: What's the hybrid pattern for using both?**
+
+A: DuckDB for interactive analysis (notebooks, ad-hoc). Spark for distributed batch (overnight ETL, feature engineering). Both read the same Parquet/Iceberg files. DuckDB writes intermediate results; Spark reads them. The key: same storage, different compute — pick the right engine for the job.
+
+**Q4: How do you justify Spark's cluster cost vs DuckDB's laptop?**
+
+A: Spark cost: $0.50/hour (EMR cluster). DuckDB cost: $0 (laptop). For 1M rows: DuckDB wins (0.1s vs 2.6s). For 1B rows: Spark wins (DuckDB hits RAM wall). The key: cost = cluster_cost × time. If Spark finishes in 10 minutes vs DuckDB in 10 hours, Spark is cheaper.
+
+**Q5: How do you handle a 10TB dataset with both DuckDB and Spark?**
+
+A: (1) DuckDB for interactive exploration (query samples, build understanding), (2) Spark for production ETL (full dataset, distributed), (3) DuckDB for dashboards (pre-aggregated Gold data), (4) Spark for feature engineering (raw Silver data). The key: DuckDB for speed, Spark for scale.
+
+---
+
+## 9. Cheat sheet
 
 | Task | PySpark |
 |---|---|

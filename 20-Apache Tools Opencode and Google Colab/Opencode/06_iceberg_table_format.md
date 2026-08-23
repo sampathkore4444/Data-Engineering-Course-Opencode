@@ -8,6 +8,25 @@
 
 ---
 
+## Table of Contents
+
+| Section | Topic |
+|---|---|
+| [1](#1-concept-what-a-table-format-is) | Concept: what a "table format" is |
+| [2](#2-architecture-the-iceberg-metadata-tree) | Architecture: the Iceberg metadata tree |
+| [3](#3-the-superpowers-concretely) | The superpowers, concretely |
+| [4](#4-catalogs-the-source-of-truth-for-pointers) | Catalogs: the source of truth for pointers |
+| [5](#5-maintenance-what-keeps-tables-healthy) | Maintenance: what keeps tables healthy |
+| [6](#6-banking-scenario-walkthrough-quarter-end-three-ways) | Banking scenario walkthrough |
+| [6.1](#61-real-world-banking-scenario-gdpr-erasure--quarter-end-audit-without-vs-with-iceberg) | Real-world: GDPR erasure + quarter-end audit |
+| [7](#7-format-spec-details-worth-knowing) | Format spec details |
+| [8](#8-end-to-end-example-watch-the-metadata-tree-work) | End-to-end example |
+| [9](#9-querying-the-same-table-from-duckdb-engine-interop) | Querying from DuckDB |
+| [10](#10-exercises) | Exercises |
+| [11](#11-cheat-sheet) | Cheat sheet |
+
+---
+
 ## 1. Concept: what a "table format" is
 
 Files are bytes. **Tables** need semantics:
@@ -1009,7 +1028,122 @@ from *compute engines* is the whole point of the lakehouse.
    Create two Iceberg views (`fraud_team` sees card_masked + risk; `merchant_analyst` sees
    only merchant + mcc). Query through DuckDB and prove each view returns different columns.
 
-## 11. Cheat sheet
+---
+
+## 11. Interview questions: Iceberg in banking
+
+### Concept 1: Table format fundamentals
+
+**Q1: What problem does Iceberg solve that plain Parquet cannot?**
+
+A: Plain Parquet has no table concept: no atomic commits, no time travel, no schema evolution, no concurrent writers. Iceberg adds a metadata layer (metadata.json → manifest list → manifests → data files) that provides: ACID transactions (atomic pointer swap), time travel (old snapshots addressable), schema evolution (field IDs), and concurrent safety (optimistic concurrency). The data files are still Parquet — Iceberg is the metadata layer on top.
+
+**Q2: Explain the Iceberg metadata tree. How does a query plan use it?**
+
+A: Catalog → metadata.json (schemas, partition specs, snapshot list) → manifest list (one row per manifest) → manifests (one row per data file with min/max stats) → data files (Parquet). A query: (1) reads metadata.json for current snapshot, (2) reads manifest list, (3) prunes manifests by partition bounds, (4) prunes data files by column stats, (5) reads only surviving Parquet files. Planning touches kilobytes, not petabytes.
+
+**Q3: What is optimistic concurrency in Iceberg?**
+
+A: Writers prepare changes (new manifests, metadata) without locking. At commit time, the catalog atomically swaps the metadata pointer. If another writer committed first, the swap fails and the first writer retries from the fresh snapshot. This is lock-free and works for concurrent appends (most common case). Conflicts on the same partitions require retry-with-rebase.
+
+**Q4: Why does Iceberg use field IDs for schema evolution?**
+
+A: Field IDs are permanent identifiers assigned at column creation. When you rename `amount` → `amount_eur`, the field ID stays the same. Old data files reference the field ID, not the name. Readers use field IDs to map columns across schema versions. This makes renames safe — old readers see the old name, new readers see the new name, both access the same data.
+
+**Q5: How does Iceberg's hidden partitioning differ from Hive partitioning?**
+nA: Hive partitioning requires users to write `WHERE date = '2026-07-15'` matching directory names. Iceberg's hidden partitioning stores transforms (e.g., `days(ts)`) in metadata. Users write `WHERE ts >= '2026-07-15' AND ts < '2026-07-16'` — the engine automatically derives which partitions match. Partitioning becomes an invisible performance detail, not a query-writing burden.
+
+### Concept 2: Time travel and snapshots
+
+**Q1: A regulator asks "what did the ledger look like on March 31st?" How do you answer with Iceberg?**
+
+A: `SELECT * FROM txns TIMESTAMP AS OF '2026-03-31 23:59:59'`. Iceberg resolves the timestamp to the nearest snapshot. Or use a tagged snapshot: `SELECT * FROM txns VERSION AS OF tag_quarter_end_2026Q1`. The answer is instant — no backup restore, no file scanning. The snapshot IS the proof.
+
+**Q2: What's the difference between a snapshot and a tag in Iceberg?**
+
+A: A snapshot is an immutable table state (id, parent, operation, timestamp). A tag is a named pointer to a snapshot (e.g., `audit_2026Q2` → snapshot 5192). Tags are used for: audit pins (retention jobs must skip tagged snapshots), regulatory compliance (quarter-end proofs), and debugging (known-good states). Branches are movable pointers (like git branches).
+
+**Q3: How do you prove that data was deleted (GDPR) using Iceberg?**
+
+A: (1) Capture pre-deletion snapshot ID. (2) Execute DELETE (creates new snapshot). (3) Show: pre-deletion snapshot has the data, post-deletion snapshot doesn't. (4) Tag pre-deletion snapshot (never expires). (5) Time travel to pre-deletion snapshot shows the data existed. The proof is reproducible: anyone can query the snapshots and verify.
+
+**Q4: What happens to old snapshots when you expire them?**
+
+A: Expiring snapshots removes metadata references to data files that are no longer needed. If no other snapshot references a data file, it becomes an orphan and can be removed by `remove_orphan_files`. Tagged snapshots are exempt — retention jobs must skip them. The key: expiry is a metadata operation, not a data rewrite.
+
+**Q5: How do you handle concurrent appends to the same Iceberg table?**
+
+A: Iceberg uses optimistic concurrency: both writers prepare manifests independently. At commit time, one succeeds, the other fails (catalog swap conflict). The failed writer retries from the fresh snapshot. For high-throughput streaming: use partition-level commits (each partition is an independent commit target). This minimizes conflicts.
+
+### Concept 3: Schema and partition evolution
+
+**Q1: How do you add a column to an Iceberg table without rewriting data?**
+
+A: `ALTER TABLE txns ADD COLUMN merchant_city STRING`. Iceberg assigns a new field ID. Old data files don't have this column — readers see NULLs for historical rows. New writes include the column. No data rewrite, no downtime. The schema evolution is recorded in metadata.json diffs that auditors can trace.
+
+**Q2: What's the difference between schema evolution and partition evolution?**
+
+A: Schema evolution changes the column structure (add/rename/drop columns) — metadata-only. Partition evolution changes how data is partitioned (e.g., `days(ts)` → `hours(ts)`) — also metadata-only. Old data files remain valid under the old partition spec. New writes use the new spec. Both are safe because Iceberg tracks which files belong to which spec.
+
+**Q3: Why is narrowing a column type (int64 → int32) dangerous?**
+
+A: int64 can hold values up to 9.2 quintillion; int32 up to 2.1 billion. If any value exceeds int32 range, it overflows or truncates. Iceberg may reject the operation or allow it with data loss. Safe operations: widen (int32 → int64, float32 → float64). Dangerous: narrow, change nullability, drop + re-add same name (new field ID).
+
+**Q4: How do you handle nested field evolution (adding a field inside a STRUCT)?**
+
+A: `ALTER TABLE txns ADD COLUMN card.risk_flags STRUCT<aml: BOOLEAN, kyc: BOOLEAN>`. Each nested field gets its own field ID. Old data files return NULL for the new nested fields. New writes include them. The key: field IDs make nested evolution safe — readers use IDs, not names, to map columns.
+
+**Q5: A bank renames a column from `amount` to `amount_eur`. What happens to downstream systems?**
+
+A: Iceberg stores the rename in metadata (field ID stays the same). Old readers see `amount` (the old name). New readers see `amount_eur` (the new name). Both access the same data via field ID. Downstream systems using the old name continue working. No data rewrite, no downtime, no broken queries.
+
+### Concept 4: Row-level operations
+
+**Q1: What's the difference between Copy-on-Write (CoW) and Merge-on-Read (MoR)?**
+
+A: CoW: affected Parquet files are rewritten without the deleted/updated rows. Reads stay fast (no merge at scan); writes are expensive (rewrite files). MoR: small delete files mark rows as dead; readers merge at scan time. Writes are fast (append delete file); reads pay the merge cost. Banking choice: CoW for regulatory marts (reads dominate), MoR for streaming ingest (writes dominate).
+
+**Q2: How does a DELETE statement work in Iceberg?**
+
+A: `DELETE FROM txns WHERE card_id = 88412` creates: (1) equality delete files marking matching rows as dead, (2) a new snapshot pointing to the updated manifest. The original data files are NOT rewritten (MoR). Readers merge delete files at scan time. Compaction later physically removes the deleted rows from Parquet files.
+
+**Q3: How does MERGE INTO work for upserts?**
+
+A: `MERGE INTO txns USING staged_fixes ON txns.txn_id = staged_fixes.txn_id WHEN MATCHED THEN UPDATE SET mcc = staged_fixes.mcc` creates: (1) delete files for matched rows, (2) new data files with updated values. This is the standard upsert pattern — delete + re-append in one atomic operation.
+
+**Q4: Why is MoR delete file growth a problem?**
+
+A: Each delete file adds merge overhead at read time. With 10K delete files, every scan must merge 10K files → slow reads. Solution: compaction (`rewrite_data_files`) consolidates delete files into rewritten Parquet files. Nightly compaction is standard: streaming writes create delete files, compaction removes them.
+
+**Q5: How do you handle GDPR cascading deletes across multiple Iceberg tables?**
+
+A: (1) Identify all card_ids for the customer. (2) Delete from each table: `DELETE FROM card_txns WHERE card_id IN (...)`. (3) Archive pre-deletion data to compliance table. (4) Tag pre-deletion snapshots (never expire). (5) Compact affected partitions. (6) Log the operation for audit. The key: atomic deletes per table, archived data for regulatory hold.
+
+### Concept 5: Maintenance and catalogs
+
+**Q1: What maintenance operations does Iceberg require, and how often?**
+
+A: Nightly: `rewrite_data_files` (compact small files), `expire_snapshots` (bound metadata growth). Weekly: `remove_orphan_files` (reclaim leaked files). Quarterly: partition-spec review (keep pruning effective). The cadence: streaming writes create small files + delete files → nightly compaction cleans up → weekly orphan cleanup → quarterly optimization.
+
+**Q2: What's the small-file problem, and how does compaction solve it?**
+
+A: Streaming ingest creates many small files (e.g., 11,000 files for 3 days of data). Each file adds metadata overhead (manifest entries, min/max stats). Planning scans thousands of manifests → slow. Compaction merges small files into larger ones (e.g., 11,000 → 4 files, one per day). Result: planning touches fewer manifests, scans are faster.
+
+**Q3: How do you choose a catalog for Iceberg?**
+
+A: Options: Hive Metastore (legacy, Spark-centric), AWS Glue (managed, S3-native), Nessie (git-like branches/tags), REST (Polaris/Unity/Lagom — open API, multi-cloud), JDBC (simple, portable). Banking choice: REST catalog with governance layer — authenticated, auditable, row/column-filtered. The catalog is the single point of truth for table metadata.
+
+**Q4: What's the difference between a catalog and a table format?**
+
+A: A table format (Iceberg) defines the metadata structure (snapshots, manifests, schema). A catalog maps table names to metadata locations (e.g., `bank.txns` → `s3://warehouse/bank/txns/metadata/v53.metadata.json`). The catalog is the entry point; the table format is the data organization. You need both: catalog for discovery, table format for ACID/time travel.
+
+**Q5: How do you handle Iceberg in a multi-engine environment (Spark + DuckDB + Trino)?**
+
+A: All engines read the same Iceberg table via the same catalog. Spark writes, DuckDB reads analytics, Trino serves BI. The key: Iceberg is engine-neutral (open spec). Each engine implements the table format spec. The catalog ensures everyone sees the same metadata. No vendor lock-in — swap engines without changing data.
+
+---
+
+## 12. Cheat sheet
 
 | Concept | Fact |
 |---|---|
