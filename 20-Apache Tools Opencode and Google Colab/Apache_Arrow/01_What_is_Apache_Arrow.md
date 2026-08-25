@@ -55,6 +55,210 @@ Query: SELECT AVG(amount) FROM customers
 → Must read all columns for each row
 → Poor CPU cache utilization
 ```
+> **Why must it read all columns when we only need `amount`?**
+>
+> In row-based storage, all columns of a row are stored **contiguously in memory** (or on disk) as a single block of bytes:
+> ```
+> Row 1 (in memory): [1001]["Alice"][50000.00]["2026-08-24"]
+>                      ↑id   ↑name   ↑amount    ↑date
+>                      └──────── all packed together ────────┘
+> ```
+>
+> The database engine reads data in **fixed-size blocks** (typically 4 KB – 8 KB pages). Since the columns are interleaved byte-by-byte, the engine **cannot jump directly** to the `amount` value — it must read the entire row block first, then parse/skip the irrelevant columns to extract `amount`. Even if the engine knows the offset of `amount` within the row, the `amount` values of different rows are **not adjacent** in memory — they are separated by `id`, `name`, and `date` fields. This means:
+>
+> 1. **Sequential access is forced**: To compute `AVG(amount)`, the engine must scan through every row's full byte sequence.
+> 2. **Cache pollution**: Loading `id`, `name`, and `date` into CPU cache lines wastes precious cache space that could hold more `amount` values.
+> 3. **No SIMD benefit**: The CPU cannot vectorize the average because `amount` values are scattered across memory, not packed in a contiguous array.
+>
+> In contrast, columnar storage keeps all `amount` values contiguous, so reading just that column loads a tight, cache-friendly block — exactly what the CPU wants.
+
+
+
+> **Why must it read all columns when we only need `amount`?**
+>
+> **Step 1 — Disk to RAM:**
+> Data lives on disk in fixed-size **pages** (typically 4 KB – 8 KB each). When the database executes `SELECT AVG(amount)`, it must first load these pages from disk into RAM. In row-based storage, each page contains **full rows packed together**:
+> ```
+> Page on disk (4 KB block):
+> ┌──────────────────────────────────────────────────────────┐
+> │ [1001]["Alice"][50000]["2026-08-24"]  ← Row 1           │
+> │ [1002]["Bob"][75000]["2026-08-24"]    ← Row 2           │
+> │ [1003]["Charlie"][60000]["2026-08-24"] ← Row 3          │
+> │ ...more full rows...                                     │
+> └──────────────────────────────────────────────────────────┘
+> ```
+> The engine **cannot selectively read only the `amount` bytes from disk** — it loads the entire page. That page is full of `id`, `name`, and `date` bytes mixed in with `amount`. So yes, the entire block (with all columns) comes into RAM.
+>
+> **Step 2 — Why not skip to `amount` in RAM?**
+> Even after the page is in RAM, the engine still can't efficiently pick out just `amount` because the values are **scattered**:
+> ```
+> RAM byte layout of one row:
+> [1001]["Alice"][50000.00]["2026-08-24"]
+>  ↑ 4B    ↑ ~7B    ↑ 8B       ↑ 12B
+> ```
+> To find `50000.00`, the engine must skip past `id` (4 bytes) and `name` (~7 bytes) first. And for the next row's `amount`, it must skip `id` + `name` again. The `amount` values are **not next to each other** — they are separated by other columns' data.
+>
+> **But what about CPU cache?**
+> The **CPU cache** is a tiny, ultra-fast memory **built into the processor chip itself** (not the main RAM). It is roughly **100x faster** than main RAM but only a few MB in size:
+> ```
+> Speed hierarchy:
+> CPU Registers  →  ~0.3 ns  (fastest, ~1 KB)
+> L1 Cache      →  ~1 ns    (32–64 KB)
+> L2 Cache      →  ~3 ns    (256 KB – 1 MB)
+> L3 Cache      →  ~10 ns   (8–64 MB)
+> Main RAM      →  ~100 ns  (GBs)
+> Disk (SSD)    →  ~10 µs   (TBs)
+> ```
+> The CPU doesn't read from RAM one byte at a time — it loads a **cache line** (typically **64 bytes**) at a time. When the CPU needs `amount` from a row, it loads a 64-byte cache line that contains that `amount` **plus surrounding bytes** (which are `id`, `name`, `date` from the same row, or rows).
+>
+> The problem: that 64-byte cache line is mostly **wasted** on data the query doesn't need. If you're computing `AVG(amount)` over 1 million rows, the CPU cache fills up with `id`, `name`, and `date` bytes instead of holding more `amount` values. This is called **cache pollution** — the cache is full of junk, so useful data gets evicted.
+>
+> **So how does the CPU actually compute AVG(amount) in row-based RAM?**
+>
+> The CPU has no magic — it **iterates byte by byte** through the row data. Here's the step-by-step process for each row:
+>
+> ```
+> // Pseudocode: what the CPU does internally for one row in RAM
+> // RAM layout: [1001]["Alice"][50000.00]["2026-08-24"]
+> //              ↑ byte 0    ↑ byte 4      ↑ byte 11     ↑ byte 19
+>
+> ptr = 0                          // start of row in RAM
+>
+> // Step A: Skip past 'id' (4 bytes)
+> //   CPU reads bytes 0–3, realizes this is 'id', ignores it
+> ptr += 4                         // ptr → 4
+>
+> // Step B: Skip past 'name' (variable-length string)
+> //   CPU reads the string length prefix (e.g., 1 byte = 5)
+> //   then skips 5 bytes of "Alice"
+> ptr += 1 + 5                     // ptr → 10
+>
+> // Step C: READ 'amount' — this is what we actually need!
+> //   CPU reads 8 bytes starting at ptr as a float64
+> amount = read_float64(ptr)       // → 50000.00 ✓
+> ptr += 8                         // ptr → 18
+>
+> // Step D: Skip past 'date' (10 bytes string)
+> ptr += 10                        // ptr → 28 (next row starts)
+>
+> // Now: accumulate for AVG
+> total += amount
+> count += 1
+> ```
+>
+> For 1 million rows, this loop runs **1 million times**. Each iteration:
+> ```
+> For EACH row (× 1,000,000):
+>   ├── Skip 4 bytes (id)          ← wasted read
+>   ├── Read string length + skip  ← wasted read
+>   ├── READ 8 bytes (amount)      ← the only useful part!
+>   ├── Skip 10 bytes (date)       ← wasted read
+>   └── CPU cache line refills multiple times during this
+> ```
+> That's roughly **25–30 bytes of wasted reads per row** just to extract 8 bytes of `amount`. Over 1M rows, the CPU moves through ~28 MB of RAM, but only **8 MB** of that is actual `amount` data. The rest is skipped bytes that still had to be loaded into cache.
+>
+> **What if the query had a WHERE clause?**
+> ```sql
+> SELECT AVG(amount) FROM customers WHERE branch_id = 'BR-001'
+> ```
+> The engine **still reads every full row** first — it must:
+> 1. Read the entire row to find `branch_id`
+> 2. Check if `branch_id == 'BR-001'`
+> 3. Only if it matches, THEN extract `amount`
+> 4. If it doesn't match, all that reading was wasted
+>
+> There's no way to skip to `branch_id` without reading `id` and `name` first, because the bytes are physically interleaved.
+>
+> **In columnar storage**, all `amount` values are packed contiguously:
+> ```
+> RAM: [50000][75000][60000][82000][...]
+>       ↑ every byte in this block is an amount
+> ```
+> A single 64-byte cache line now holds **8 amount values** (8 bytes each) — all useful. No wasted space, no skipping, and the CPU can even use **SIMD** (Single Instruction, Multiple Data) to average 4–8 amounts in a single clock cycle.
+>
+> **So how does the CPU actually compute AVG(amount) in columnar RAM?**
+>
+> The `amount` column is stored as a **contiguous array of float64** values — no gaps, no other columns in between:
+> ```
+> Columnar RAM layout (amounts column only):
+> Byte offset:  0     8     16    24    32    40    48    56
+>              [50000][75000][60000][82000][...][...][...][...]
+>              ↑ float64 ↑ float64 ↑ float64 ...
+>              └───────── all 8 bytes are useful ────────────┘
+> ```
+>
+> **Simple loop — no skipping needed:**
+> ```
+> // Pseudocode: what the CPU does for columnar AVG(amount)
+> // RAM layout: [50000][75000][60000][82000]...
+> //              ↑ byte 0  ↑ byte 8  ↑ byte 16  ↑ byte 24
+>
+> ptr = 0                          // start of amount array
+>
+> // Step A: READ 8 bytes — this IS the amount!
+> amount_1 = read_float64(ptr)     // → 50000.00 ✓
+> ptr += 8                         // ptr → 8
+>
+> // Step B: READ 8 bytes — next amount, immediately adjacent!
+> amount_2 = read_float64(ptr)     // → 75000.00 ✓
+> ptr += 8                         // ptr → 16
+>
+> // Step C: READ 8 bytes — and the next one...
+> amount_3 = read_float64(ptr)     // → 60000.00 ✓
+> ptr += 8                         // ptr → 24
+>
+> // Step D: READ 8 bytes — no stopping!
+> amount_4 = read_float64(ptr)     // → 82000.00 ✓
+> ptr += 8                         // ptr → 32
+>
+> // Every single byte read is useful. No skips.
+> ```
+>
+> For 1 million rows, this loop also runs 1 million times, but each iteration:
+> ```
+> For EACH row (× 1,000,000):
+>   ├── READ 8 bytes (amount)  ← USEFUL!
+>   ├── READ 8 bytes (amount)  ← USEFUL!
+>   ├── READ 8 bytes (amount)  ← USEFUL!
+>   ├── READ 8 bytes (amount)  ← USEFUL!
+>   └── Zero wasted bytes. Every byte = amount.
+> ```
+> Over 1M rows, the CPU moves through **exactly 8 MB** of RAM — and **all 8 MB is `amount` data**. Compare that to row-based: 28 MB traversed, only 8 MB useful.
+>
+> **But wait — it gets even better with SIMD:**
+>
+> Modern CPUs have **SIMD registers** that are 256 bits (32 bytes) or 512 bits (64 bytes) wide. Instead of reading one `float64` at a time, the CPU can load **4 or 8 at once** and compute on them in parallel:
+> ```
+> // Without SIMD: one amount per instruction
+> for i in range(4):
+>     total += amounts[i]           // 4 separate ADD instructions
+>
+> // With SIMD (256-bit register = 4 × float64): FOUR amounts at once!
+> register_A = [50000, 75000, 60000, 82000]   // load 32 bytes in ONE step
+> register_B = [91000, 33000, 44000, 67000]   // load next 32 bytes
+> register_C = register_A + register_B         // 4 ADDs in ONE cycle!
+> //            [141000, 108000, 104000, 149000]
+> ```
+> This is **SIMD vectorization** — one instruction processes multiple data points simultaneously. It only works when data is **contiguous and same-typed**, which is exactly what columnar storage guarantees.
+>
+> **What about a WHERE clause in columnar?**
+> ```sql
+> SELECT AVG(amount) FROM customers WHERE branch_id = 'BR-001'
+> ```
+> In columnar, `branch_id` is its own contiguous array:
+> ```
+> branch_ids: ["BR-001", "BR-003", "BR-001", "BR-002", ...]
+> amounts:    [50000,    75000,    60000,    82000,    ...]
+> ```
+> The engine scans ONLY the `branch_id` array to build a **boolean mask** (which rows match), then uses that mask to grab only matching `amount` values. The `id`, `name`, and `date` arrays are **never touched at all** — they stay on disk.
+>
+> **Summary — Row vs Columnar in RAM:**
+> ```
+> Row-based:                          Columnar:
+> [id][name][amount][date]            [amount][amount][amount][amount]
+>  skip skip READ skip                  READ    READ    READ    READ
+>  ↑ 25 bytes wasted per row          ↑ 0 bytes wasted
+> ```
 
 **Columnar (Arrow):**
 ```
@@ -68,6 +272,118 @@ Query: SELECT AVG(amount) FROM customers
 → Excellent CPU cache utilization
 → SIMD vectorization possible
 ```
+
+> **Why can it read ONLY the Amounts column?**
+>
+> **Step 1 — Disk to RAM (only the needed column):**
+> In columnar storage, each column is stored as its own **separate, contiguous block** on disk:
+> ```
+> Disk layout (each column is an independent file/chunk):
+> ┌─────────────────────────────────────┐
+> │ IDs file:     [1001][1002][1003]...  │
+> │ Names file:   ["Alice"]["Bob"]...    │
+> │ Amounts file: [50000][75000][60000]...│ ← engine reads ONLY this
+> │ Dates file:   ["2026-08-24"]...      │
+> └─────────────────────────────────────┘
+> ```
+> The engine **knows it only needs `amount`**, so it loads just the Amounts file into RAM. The IDs, Names, and Dates files **stay on disk untouched**. Compare this to row-based, where the entire page (all columns packed together) had to come in.
+>
+> **Step 2 — In RAM, it's a tight, contiguous array:**
+> Once loaded, the Amounts column in RAM looks like this:
+> ```
+> RAM layout (Amounts column only):
+> Byte offset:  0       8        16       24
+>              [50000]  [75000]  [60000]  [82000]
+>              ↑ 8B     ↑ 8B     ↑ 8B     ↑ 8B
+>              └──── all bytes are useful ────────┘
+> ```
+> No other columns in between. No `id`, no `name`, no `date` bytes to skip past. Every byte the CPU reads is an `amount` value.
+>
+> **Step 3 — How the CPU iterates through this array:**
+> ```
+> // Pseudocode: columnar AVG(amount) in RAM
+> // RAM: [50000][75000][60000][82000]...
+>
+> ptr = 0                          // start of Amounts array
+>
+> // Iteration 1: READ 8 bytes → done!
+> amount_1 = read_float64(ptr)     // → 50000.00 ✓
+> ptr += 8
+>
+> // Iteration 2: READ 8 bytes → done!
+> amount_2 = read_float64(ptr)     // → 75000.00 ✓
+> ptr += 8
+>
+> // Iteration 3: READ 8 bytes → done!
+> amount_3 = read_float64(ptr)     // → 60000.00 ✓
+> ptr += 8
+>
+> // No skipping. No parsing. Just read after read.
+> ```
+> Each step is just **8 bytes = 1 amount**. No string-length parsing, no variable-length skipping. The CPU can even **unroll the loop** to read 4 amounts at once.
+>
+> **Step 4 — Why SIMD works here:**
+> SIMD (Single Instruction, Multiple Data) lets the CPU process **4 or 8 values in one clock cycle** — but only if the data is **contiguous and same-typed**. Columnar storage guarantees exactly that:
+> ```
+> 256-bit SIMD register (32 bytes = 4 × float64):
+> ┌──────────────────────────────────────────┐
+> │ [50000] [75000] [60000] [82000]          │
+> └──────────────────────────────────────────┘
+>  ONE instruction adds all 4 simultaneously
+> ```
+> In row-based storage, this is impossible — `amount` values are scattered across different rows, separated by `id`, `name`, `date` bytes. You can't load 4 `amount`s into one SIMD register because they aren't adjacent.
+>
+> **Step 5 — Cache efficiency (the big win):**
+> ```
+> CPU Cache Line = 64 bytes
+>
+> Row-based:
+> [1001]["Alice"][50000]["2026-08-24"] = 1 amount per cache line (+ junk)
+> → 1 useful value per 64-byte load
+>
+> Columnar:
+> [50000][75000][60000][82000][...][...][...][...] = 8 amounts per cache line
+> → 8 useful values per 64-byte load (8× better!)
+> ```
+> The CPU cache is tiny (32–64 KB for L1). In row-based, it fills up with junk and keeps evicting useful data. In columnar, every cache line is packed with `amount` values — the cache stays useful longer, fewer disk round-trips.
+>
+> **Step 6 — What about WHERE clause in columnar?**
+> ```sql
+> SELECT AVG(amount) FROM customers WHERE branch_id = 'BR-001'
+> ```
+> The engine does this:
+> ```
+> branch_ids column:  ["BR-001", "BR-003", "BR-001", "BR-002"]
+> amounts column:     [50000,    75000,    60000,    82000]
+>
+> Step A: Scan branch_ids → build mask [True, False, True, False]
+> Step B: Apply mask to amounts → [50000, 60000]
+> Step C: AVG([50000, 60000]) = 55000
+> ```
+> The engine **never loads** the `id`, `name`, or `date` columns at all. Only `branch_id` (for filtering) and `amount` (for aggregation) are touched.
+>
+> **Head-to-Head Comparison:**
+> ```
+>                        Row-Based                    Columnar
+> ─────────────────────────────────────────────────────────────
+> Disk → RAM          Load entire page            Load only Amounts column
+>                      (all columns)               (nothing else)
+>
+> RAM layout          [id][name][amount][date]    [amount][amount][amount]
+>                      interleaved, mixed types    contiguous, same type
+>
+> Bytes read/row      ~31 bytes (all cols)         8 bytes (amount only)
+> Useful bytes/row    8 bytes (amount)             8 bytes (amount)
+> Waste/row           23 bytes (74% waste)         0 bytes (0% waste)
+>
+> 1M rows traversed   ~28 MB                       ~8 MB
+> Useful data         8 MB                         8 MB
+> Waste               ~20 MB                       0 MB
+>
+> SIMD possible?      ✗ No (values scattered)      ✓ Yes (values contiguous)
+>
+> Cache efficiency    1 amount per 64B line        8 amounts per 64B line
+> ```
 
 ---
 
