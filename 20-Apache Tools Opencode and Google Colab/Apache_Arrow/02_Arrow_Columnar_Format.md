@@ -98,7 +98,7 @@ table = pa.table({
 })
 ```
 
-**Memory Layout:**
+**Memory Layout in RAM Memory:**
 ```
 id Column (int64):
   [1001][1002][1003][1004][1005]  ← 40 bytes (5 × 8 bytes)
