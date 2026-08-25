@@ -7,7 +7,7 @@
 ### What is Arrow IPC?
 
 Arrow IPC is:
-- **Binary Format**: Efficient serialization
+- **Binary Format**: Efficient serialization 
 - **Zero-Copy**: No deserialization overhead
 - **Cross-Language**: Works with Python, Java, C++, etc.
 - **Streamable**: Supports streaming data
