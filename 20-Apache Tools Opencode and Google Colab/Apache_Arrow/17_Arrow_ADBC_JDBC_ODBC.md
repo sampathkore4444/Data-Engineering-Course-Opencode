@@ -156,6 +156,172 @@ Arrow Flight is an **RPC framework** (not a database protocol) built on top of g
 └─────────────────────────────────────────────────────────┘
 ```
 
+### Understanding the Components
+
+#### Flight Server
+
+The Flight Server is the **data provider** — it hosts the data and serves it to clients.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Flight Server                         │
+│                                                         │
+│  Responsibilities:                                      │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ 1. Host data (Parquet files, database, etc.)     │   │
+│  │ 2. Accept client requests                        │   │
+│  │ 3. Read data into Arrow format                   │   │
+│  │ 4. Stream Arrow batches to client                │   │
+│  │ 5. Handle authentication & authorization         │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  Example: Dremio, Apache Calcite, custom servers        │
+└─────────────────────────────────────────────────────────┘
+```
+
+```python
+# Flight Server Example
+import pyarrow.flight as flight
+import pyarrow.parquet as pq
+
+class MyServer(flight.FlightServerBase):
+    def do_get(self, context, ticket):
+        # Client requests data via ticket
+        filepath = ticket.ticket.decode()
+        table = pq.read_table(filepath)  # Read Parquet
+        return flight.RecordBatchStream(table)  # Stream as Arrow
+
+# Start server
+server = MyServer()
+server.init("grpc://0.0.0.0:8815")
+print("Flight Server running on port 8815")
+```
+
+---
+
+#### Flight Client
+
+The Flight Client is the **data consumer** — it connects to the server and fetches data.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Flight Client                         │
+│                                                         │
+│  Responsibilities:                                      │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ 1. Connect to Flight Server                      │   │
+│  │ 2. Discover available data (list_flights)        │   │
+│  │ 3. Request data via tickets (do_get)             │   │
+│  │ 4. Receive Arrow batches (zero-copy)             │   │
+│  │ 5. Convert to DataFrame if needed                │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  Example: Python app, Jupyter notebook, dashboard       │
+└─────────────────────────────────────────────────────────┘
+```
+
+```python
+# Flight Client Example
+import pyarrow.flight as flight
+
+# Connect to server
+client = flight.connect("grpc://localhost:8815")
+
+# List available data
+for info in client.list_flights():
+    print(f"Available: {info.descriptor.path[0]}")
+
+# Fetch data
+reader = client.do_get(flight.Ticket(b"/data/transactions.parquet"))
+table = reader.read_all()  # Arrow Table (zero-copy)
+
+# Convert to pandas if needed
+df = table.to_pandas()
+```
+
+---
+
+#### gRPC + Arrow (Columnar) Flow
+
+This is the **transport layer** — how data moves from server to client.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              gRPC + Arrow Data Flow                      │
+│                                                         │
+│  Flight Server                    Flight Client         │
+│  ┌──────────────┐                ┌──────────────┐      │
+│  │              │                │              │      │
+│  │  Database    │    gRPC        │  Application │      │
+│  │  (Parquet)   │ ◄───────────► │  (Pandas)    │      │
+│  │              │   + Arrow     │              │      │
+│  │              │   Batches     │              │      │
+│  └──────────────┘                └──────────────┘      │
+│         │                               │               │
+│         ▼                               ▼               │
+│  ┌──────────────┐                ┌──────────────┐      │
+│  │ Arrow Format │                │ Arrow Format │      │
+│  │ (Columnar)   │                │ (Columnar)   │      │
+│  └──────────────┘                └──────────────┘      │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Step-by-step flow:**
+
+```
+Step 1: Client sends request
+┌────────┐                         ┌────────┐
+│ Client │ ─── DoGet(ticket) ────► │ Server │
+└────────┘                         └────────┘
+
+Step 2: Server reads data into Arrow format
+┌────────┐                         ┌────────┐
+│ Client │                         │ Server │
+│        │                         │   │    │
+│        │                         │   ▼    │
+│        │                         │ Parquet │
+│        │                         │   │    │
+│        │                         │   ▼    │
+│        │                         │ Arrow  │
+│        │                         │ Table  │
+└────────┘                         └────────┘
+
+Step 3: Server streams Arrow batches via gRPC
+┌────────┐                         ┌────────┐
+│ Client │ ◄── Arrow Batch 1 ──── │ Server │
+│ Client │ ◄── Arrow Batch 2 ──── │ Server │
+│ Client │ ◄── Arrow Batch 3 ──── │ Server │
+│ Client │ ◄── Arrow Batch N ──── │ Server │
+└────────┘                         └────────┘
+
+Step 4: Client assembles Arrow Table (zero-copy)
+┌────────┐                         ┌────────┐
+│ Client │                         │ Server │
+│   │    │                         │        │
+│   ▼    │                         │        │
+│ Arrow  │                         │        │
+│ Table  │                         │        │
+└────────┘                         └────────┘
+```
+
+**Why gRPC + Arrow is fast:**
+
+| Component | Benefit |
+|-----------|----------|
+| **gRPC** | High-performance RPC, HTTP/2 multiplexing, streaming support |
+| **Arrow** | Columnar format, zero-copy, memory-efficient |
+| **Combined** | No serialization overhead, parallel transfers, batch streaming |
+
+**Data stays in Arrow format throughout:**
+```
+Database (Columnar)  →  gRPC (Arrow Batches)  →  Client (Arrow Table)
+       │                      │                        │
+       └──────────────────────┴────────────────────────┘
+                    No conversion at any step!
+```
+
+---
+
 ### Arrow Flight vs JDBC/ODBC
 
 | Feature | JDBC/ODBC | Arrow Flight |
