@@ -141,18 +141,18 @@ Arrow Flight is an **RPC framework** (not a database protocol) built on top of g
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Arrow Flight Architecture             │
+│                    Arrow Flight Architecture            │
 │                                                         │
-│  ┌──────────┐    gRPC + Arrow    ┌──────────┐          │
-│  │  Flight   │ ◄───────────────► │  Flight   │          │
-│  │  Server   │   (Columnar)     │  Client   │          │
-│  └──────────┘                   └──────────┘          │
+│  ┌──────────┐    gRPC + Arrow    ┌──────────┐           │
+│  │  Flight  │ ◄───────────────►  │  Flight  │           │
+│  │  Server  │   (Columnar)       │  Client  │           │
+│  └──────────┘                    └──────────┘           │
 │       │                              │                  │
 │       ▼                              ▼                  │
-│  ┌──────────┐                   ┌──────────┐          │
-│  │ Database  │                   │  App     │          │
-│  │ (Parquet) │                   │ (Pandas) │          │
-│  └──────────┘                   └──────────┘          │
+│  ┌──────────┐                   ┌──────────┐            │
+│  │ Database  │                   │  App     │           │
+│  │ (Parquet) │                   │ (Pandas) │           │
+│  └──────────┘                   └──────────┘            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -164,16 +164,16 @@ The Flight Server is the **data provider** — it hosts the data and serves it t
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Flight Server                         │
+│                    Flight Server                        │
 │                                                         │
 │  Responsibilities:                                      │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ 1. Host data (Parquet files, database, etc.)     │   │
-│  │ 2. Accept client requests                        │   │
-│  │ 3. Read data into Arrow format                   │   │
-│  │ 4. Stream Arrow batches to client                │   │
-│  │ 5. Handle authentication & authorization         │   │
-│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ 1. Host data (Parquet files, database, etc.)    │    │
+│  │ 2. Accept client requests                       │    │
+│  │ 3. Read data into Arrow format                  │    │
+│  │ 4. Stream Arrow batches to client               │    │
+│  │ 5. Handle authentication & authorization        │    │
+│  └─────────────────────────────────────────────────┘    │
 │                                                         │
 │  Example: Dremio, Apache Calcite, custom servers        │
 └─────────────────────────────────────────────────────────┘
@@ -205,16 +205,16 @@ The Flight Client is the **data consumer** — it connects to the server and fet
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Flight Client                         │
+│                    Flight Client                        │
 │                                                         │
 │  Responsibilities:                                      │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ 1. Connect to Flight Server                      │   │
-│  │ 2. Discover available data (list_flights)        │   │
-│  │ 3. Request data via tickets (do_get)             │   │
-│  │ 4. Receive Arrow batches (zero-copy)             │   │
-│  │ 5. Convert to DataFrame if needed                │   │
-│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │ 1. Connect to Flight Server                     │    │
+│  │ 2. Discover available data (list_flights)       │    │
+│  │ 3. Request data via tickets (do_get)            │    │
+│  │ 4. Receive Arrow batches (zero-copy)            │    │
+│  │ 5. Convert to DataFrame if needed               │    │
+│  └─────────────────────────────────────────────────┘    │
 │                                                         │
 │  Example: Python app, Jupyter notebook, dashboard       │
 └─────────────────────────────────────────────────────────┘
@@ -247,22 +247,22 @@ This is the **transport layer** — how data moves from server to client.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              gRPC + Arrow Data Flow                      │
+│              gRPC + Arrow Data Flow                     │
 │                                                         │
 │  Flight Server                    Flight Client         │
-│  ┌──────────────┐                ┌──────────────┐      │
-│  │              │                │              │      │
-│  │  Database    │    gRPC        │  Application │      │
-│  │  (Parquet)   │ ◄───────────► │  (Pandas)    │      │
-│  │              │   + Arrow     │              │      │
-│  │              │   Batches     │              │      │
-│  └──────────────┘                └──────────────┘      │
+│  ┌──────────────┐                ┌──────────────┐       │
+│  │              │                │              │       │
+│  │  Database    │    gRPC        │  Application │       │
+│  │  (Parquet)   │ ◄───────────►  │  (Pandas)    │       │
+│  │              │   + Arrow      │              │       │
+│  │              │   Batches      │              │       │
+│  └──────────────┘                └──────────────┘       │
 │         │                               │               │
 │         ▼                               ▼               │
-│  ┌──────────────┐                ┌──────────────┐      │
-│  │ Arrow Format │                │ Arrow Format │      │
-│  │ (Columnar)   │                │ (Columnar)   │      │
-│  └──────────────┘                └──────────────┘      │
+│  ┌──────────────┐                ┌──────────────┐       │
+│  │ Arrow Format │                │ Arrow Format │       │
+│  │ (Columnar)   │                │ (Columnar)   │       │
+│  └──────────────┘                └──────────────┘       │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -279,7 +279,7 @@ Step 2: Server reads data into Arrow format
 │ Client │                         │ Server │
 │        │                         │   │    │
 │        │                         │   ▼    │
-│        │                         │ Parquet │
+│        │                         │ Parquet│
 │        │                         │   │    │
 │        │                         │   ▼    │
 │        │                         │ Arrow  │
@@ -288,10 +288,10 @@ Step 2: Server reads data into Arrow format
 
 Step 3: Server streams Arrow batches via gRPC
 ┌────────┐                         ┌────────┐
-│ Client │ ◄── Arrow Batch 1 ──── │ Server │
-│ Client │ ◄── Arrow Batch 2 ──── │ Server │
-│ Client │ ◄── Arrow Batch 3 ──── │ Server │
-│ Client │ ◄── Arrow Batch N ──── │ Server │
+│ Client │ ◄── Arrow Batch 1 ────  │ Server │
+│ Client │ ◄── Arrow Batch 2 ────  │ Server │
+│ Client │ ◄── Arrow Batch 3 ────  │ Server │
+│ Client │ ◄── Arrow Batch N ────  │ Server │
 └────────┘                         └────────┘
 
 Step 4: Client assembles Arrow Table (zero-copy)
