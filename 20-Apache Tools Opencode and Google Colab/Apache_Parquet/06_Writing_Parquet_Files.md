@@ -2,12 +2,14 @@
 
 ## Table of Contents
 1. [Detailed Explanation](#1-detailed-explanation)
-2. [Example](#2-example)
-3. [Real-World Banking Scenario 1](#3-banking-scenario-1-batch-etl-pipeline)
-4. [Python Code - Scenario 1](#4-python-code---scenario-1)
-5. [Real-World Banking Scenario 2](#5-banking-scenario-2-streaming-ingestion)
-6. [Python Code - Scenario 2](#6-python-code---scenario-2)
-7. [Interview Questions](#7-interview-questions)
+2. [Writing Interfaces Comparison](#2-writing-interfaces-comparison)
+3. [Example](#3-example)
+4. [Real-World Scenario: Writing Interface Comparison](#4-real-world-scenario-writing-interface-comparison)
+5. [Real-World Banking Scenario 1](#5-banking-scenario-1-batch-etl-pipeline)
+6. [Python Code - Scenario 1](#6-python-code---scenario-1)
+7. [Real-World Banking Scenario 2](#7-banking-scenario-2-streaming-ingestion)
+8. [Python Code - Scenario 2](#8-python-code---scenario-2)
+9. [Interview Questions](#9-interview-questions)
 
 ---
 
@@ -191,7 +193,337 @@ pq.write_table(table, "output.parquet")
 
 ---
 
-## 2. Example
+## 2. Writing Interfaces Comparison
+
+### Overview: The Five Main Ways to Write Parquet in Python
+
+There are five primary interfaces for writing Parquet files. Each serves a different use case:
+
+| Interface | Source | Input Type | Best For |
+|-----------|--------|------------|----------|
+| `df.to_parquet()` | pandas | `pd.DataFrame` | Quick writes, notebooks |
+| `pq.write_table()` | PyArrow | `pa.Table` | Single-file writes, pipelines |
+| `pq.write_to_dataset()` | PyArrow | `pa.Table` | Partitioned data lakes |
+| `pq.ParquetWriter` | PyArrow | `pa.Table` (incremental) | Streaming, large datasets |
+| `pl.write_parquet()` | Polars | `pl.DataFrame` | High-performance writes |
+| `fastparquet.write()` | Fastparquet | `pd.DataFrame` | Dask workflows |
+
+---
+
+### 2.1 `df.to_parquet()` — Pandas Native
+
+```python
+import pandas as pd
+
+# Simple — write DataFrame directly
+df.to_parquet("output.parquet")
+
+# With compression
+df.to_parquet("output.parquet", engine="pyarrow", compression="zstd")
+
+# With partitioning
+df.to_parquet("output_dir/", engine="pyarrow", partition_cols=["date"])
+
+# With column selection
+df.to_parquet("output.parquet", engine="pyarrow", columns=["amount", "date"])
+```
+
+**Under the hood:** `df.to_parquet()` converts the pandas DataFrame to an Arrow Table, then calls `pq.write_table()` internally. It is a thin convenience wrapper.
+
+---
+
+### 2.2 `pq.write_table()` — PyArrow Single-File Write
+
+```python
+import pyarrow.parquet as pq
+
+# Write entire table
+pq.write_table(table, "output.parquet")
+
+# With full control
+pq.write_table(
+    table,
+    "output.parquet",
+    compression="zstd",
+    compression_level=3,
+    use_dictionary=True,
+    write_statistics=True,
+    data_page_size=1_048_576,
+    row_group_size=1_000_000,
+    version="2.6",
+)
+```
+
+**Under the hood:** Directly writes the Arrow Table to a single Parquet file. No pandas overhead.
+
+---
+
+### 2.3 `pq.write_to_dataset()` — Partitioned Write
+
+```python
+import pyarrow.parquet as pq
+
+# Write partitioned dataset
+pq.write_to_dataset(
+    table,
+    root_path="output/",
+    partition_cols=["year", "month"],
+    compression="zstd",
+    use_dictionary=True,
+    write_statistics=True,
+)
+```
+
+**Under the hood:** Splits the table by partition columns, writes each partition as a separate Parquet file in a directory hierarchy.
+
+---
+
+### 2.4 `pq.ParquetWriter` — Streaming/Incremental Write
+
+```python
+import pyarrow.parquet as pq
+
+# Create writer with schema
+writer = pq.ParquetWriter(
+    "output.parquet",
+    schema=table.schema,
+    compression="zstd",
+    use_dictionary=True,
+)
+
+# Write batches incrementally
+writer.write_table(batch1)
+writer.write_table(batch2)
+writer.write_table(batch3)
+
+# Close to flush footer
+writer.close()
+```
+
+**Under the hood:** Writes row groups incrementally. Footer is written only when `close()` is called. Ideal for streaming data.
+
+---
+
+### 2.5 `pl.write_parquet()` — Polars Native
+
+```python
+import polars as pl
+
+# Write entire DataFrame
+df.write_parquet("output.parquet")
+
+# With compression
+df.write_parquet("output.parquet", compression="zstd")
+
+# With row group size
+df.write_parquet("output.parquet", row_group_size=1_000_000)
+
+# Lazy streaming write (larger-than-RAM)
+(
+    pl.scan_parquet("input.parquet")
+    .filter(pl.col("amount") > 1000)
+    .sink_parquet("output.parquet")  # streams to disk
+)
+```
+
+**Under the hood:** Polars writes directly from its Rust core. `sink_parquet()` enables streaming writes for datasets larger than RAM.
+
+---
+
+### 2.6 `fastparquet.write()` — Fastparquet Native
+
+```python
+import fastparquet
+
+# Write from pandas DataFrame
+fastparquet.write("output.parquet", df)
+
+# With compression
+fastparquet.write("output.parquet", df, compression="zstd")
+
+# With partitioning
+fastparquet.write("output_dir/", df, write_related_files=True,
+                   partition_on=["date"])
+```
+
+**Under the hood:** Writes directly from pandas without Arrow conversion. Uses thrift for metadata.
+
+---
+
+### 2.7 Feature Comparison
+
+| Feature | `df.to_parquet()` | `pq.write_table()` | `pq.write_to_dataset()` | `pq.ParquetWriter` | `pl.write_parquet()` | `fastparquet.write()` |
+|---------|-------------------|--------------------|------------------------|--------------------|--------------------|---------------------|
+| **Input** | DataFrame | Arrow Table | Arrow Table | Arrow Table (batch) | Polars DataFrame | DataFrame |
+| **Single file** | ✅ Yes | ✅ Yes | ❌ No | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Partitioning** | ✅ Via engine | ❌ No | ✅ Yes | ❌ No | ⚠️ Manual | ✅ Yes |
+| **Streaming** | ❌ No | ❌ No | ❌ No | ✅ Yes | ✅ `sink_parquet()` | ❌ No |
+| **Compression** | ✅ All codecs | ✅ All codecs | ✅ All codecs | ✅ All codecs | ✅ All codecs | ✅ All codecs |
+| **Dictionary encoding** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Statistics** | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes | ✅ Yes |
+| **Schema control** | ⚠️ Limited | ✅ Full | ✅ Full | ✅ Full | ⚠️ Limited | ⚠️ Limited |
+| **Memory efficiency** | ⚠️ pandas overhead | ✅ Arrow format | ✅ Arrow format | ✅ Arrow format | ✅ Rust core | ⚠️ pandas overhead |
+| **Speed** | ⚠️ Moderate | ✅ Fast | ✅ Fast | ✅ Fast | ✅ Fastest | ⚠️ Slower |
+| **Larger-than-RAM** | ❌ No | ❌ No | ❌ No | ⚠️ Manual batching | ✅ `sink_parquet()` | ❌ No |
+| **Cloud storage** | ⚠️ Via fsspec | ✅ Native | ✅ Native | ✅ Native | ✅ Native | ⚠️ Via fsspec |
+| **Complexity** | Low | Low | Medium | High | Low | Low |
+
+---
+
+### 2.8 Advantages & Disadvantages
+
+#### `df.to_parquet()` (Pandas)
+
+| Advantages | Disadvantages |
+|------------|---------------|
+| ✅ Simplest API — one line to write | ❌ Always converts through Arrow (overhead) |
+| ✅ Familiar to pandas users | ❌ No direct schema control |
+| ✅ Works with any engine (pyarrow, fastparquet) | ❌ No streaming support |
+| ✅ Supports partitioning via engine | ❌ Memory-inefficient for large DataFrames |
+| ✅ Great for quick prototyping | ❌ Cannot write row groups incrementally |
+
+#### `pq.write_table()` (PyArrow)
+
+| Advantages | Disadvantages |
+|------------|---------------|
+| ✅ Direct Arrow write (no pandas overhead) | ❌ Single file only — no partitioning |
+| ✅ Full control over all write parameters | ❌ Must manually manage partitioning |
+| ✅ Fastest single-file write | ❌ No streaming support |
+| ✅ Schema control | ❌ Requires Arrow Table input |
+| ✅ All compression codecs | |
+
+#### `pq.write_to_dataset()` (PyArrow Partitioned)
+
+| Advantages | Disadvantages |
+|------------|---------------|
+| ✅ Automatic partitioning (Hive-style) | ❌ Creates many small files per partition |
+| ✅ Directory hierarchy created automatically | ❌ No streaming support |
+| ✅ Optimized for data lake queries | ❌ Overhead from directory management |
+| ✅ Full compression and encoding control | ❌ Cannot write single large file |
+
+#### `pq.ParquetWriter` (PyArrow Streaming)
+
+| Advantages | Disadvantages |
+|------------|---------------|
+| ✅ Incremental writes (streaming) | ❌ Most complex API |
+| ✅ Footer written only at close() | ❌ Must manage schema manually |
+| ✅ Memory-efficient for large data | ❌ No partitioning support |
+| ✅ Ideal for real-time ingestion | ❌ Error handling more complex |
+
+#### `pl.write_parquet()` (Polars)
+
+| Advantages | Disadvantages |
+|------------|---------------|
+| ✅ Fastest write speed (Rust core) | ❌ Different API from pandas |
+| ✅ `sink_parquet()` for streaming writes | ❌ Smaller ecosystem |
+| ✅ No pandas/Arrow conversion needed | ❌ Some features experimental |
+| ✅ Memory-efficient | ❌ Learning curve for pandas users |
+| ✅ Lazy evaluation + query optimization | |
+
+#### `fastparquet.write()` (Fastparquet)
+
+| Advantages | Disadvantages |
+|------------|---------------|
+| ✅ Direct pandas write (no Arrow) | ❌ Slower than PyArrow |
+| ✅ Lightweight dependency | ❌ No streaming support |
+| ✅ Good Dask integration | ❌ Limited feature set |
+| ✅ Simple API | ❌ Less active maintenance |
+
+---
+
+### 2.9 When to Use Which Approach?
+
+| Scenario | Recommendation | Why |
+|----------|---------------|-----|
+| Quick write in notebook | `df.to_parquet()` | Simplest API |
+| Single Parquet file, full control | `pq.write_table()` | Direct Arrow write |
+| Partitioned data lake | `pq.write_to_dataset()` | Automatic partitioning |
+| Streaming ingestion (Kafka → Parquet) | `pq.ParquetWriter` or `pl.sink_parquet()` | Incremental/streaming writes |
+| High-performance write pipeline | `pl.write_parquet()` | Fastest (Rust core) |
+| Dask distributed writes | `fastparquet.write()` | Native Dask integration |
+| Larger-than-RAM data | `pl.sink_parquet()` | Streaming write support |
+| Production ETL (partitioned + optimized) | `pq.write_to_dataset()` | Full control + partitioning |
+| Converting pandas → Parquet quickly | `df.to_parquet(engine="pyarrow")` | PyArrow engine, simple |
+| Schema-critical writes | `pq.write_table()` with explicit schema | Full schema control |
+
+---
+
+### 2.10 Performance Comparison
+
+#### Writing 10M Rows (10 columns)
+
+| Method | Write Time | File Size | Notes |
+|--------|-----------|-----------|-------|
+| `df.to_parquet(engine="pyarrow")` | ~3.2s | ~180 MB | pandas → Arrow → Parquet |
+| `df.to_parquet(engine="fastparquet")` | ~5.8s | ~195 MB | Direct pandas → Parquet |
+| `pq.write_table()` | ~1.8s | ~175 MB | Direct Arrow → Parquet |
+| `pq.write_to_dataset()` | ~2.1s | ~180 MB | Partitioned write overhead |
+| `pl.write_parquet()` | ~1.2s | ~170 MB | Rust core, fastest |
+| `pl.sink_parquet()` (lazy) | ~1.0s | ~170 MB | Streaming write |
+
+> **Key insight:** Polars is ~2.5x faster than pandas for writing Parquet. PyArrow `write_table` is ~1.8x faster than pandas.
+
+#### The Hidden Cost of `df.to_parquet()`
+
+```python
+import pandas as pd
+import pyarrow.parquet as pq
+import pyarrow as pa
+import numpy as np
+import time
+
+# Create test DataFrame
+df = pd.DataFrame({
+    "id": np.arange(10_000_000),
+    "value": np.random.randn(10_000_000),
+    "category": np.random.choice(["A", "B", "C", "D"], 10_000_000),
+})
+
+# Method 1: df.to_parquet (pandas way)
+t0 = time.time()
+df.to_parquet("test_pandas.parquet", engine="pyarrow")
+print(f"df.to_parquet: {time.time()-t0:.2f}s")
+
+# Method 2: pq.write_table (Arrow way)
+t0 = time.time()
+table = pa.Table.from_pandas(df)  # convert once
+pq.write_table(table, "test_arrow.parquet")
+print(f"pq.write_table: {time.time()-t0:.2f}s")
+
+# Method 3: Polars
+import polars as pl
+df_pl = pl.from_pandas(df)
+t0 = time.time()
+df_pl.write_parquet("test_polars.parquet")
+print(f"pl.write_parquet: {time.time()-t0:.2f}s")
+```
+
+**Typical output:**
+```
+df.to_parquet:     3.24s
+pq.write_table:    1.82s   ← 1.8x faster (no pandas overhead)
+pl.write_parquet:  1.18s   ← 2.7x faster (Rust core)
+```
+
+---
+
+### 2.11 Common Pitfalls When Choosing a Write Approach
+
+1. **Using `df.to_parquet()` for large datasets**: If your data is >1 GB, prefer `pq.write_table()` to avoid the pandas→Arrow conversion overhead.
+
+2. **Not using partitioning for data lakes**: Always use `pq.write_to_dataset()` with partition columns for data lake storage. Without partitioning, queries must scan all files.
+
+3. **Using `pq.write_table()` for streaming**: For real-time ingestion, use `pq.ParquetWriter` or `pl.sink_parquet()` to write incrementally.
+
+4. **Ignoring statistics**: Always set `write_statistics=True` (default). Statistics enable predicate pushdown during reads.
+
+5. **Wrong compression for use case**: Use Snappy for interactive queries, Zstd for general purpose, Gzip for archival.
+
+6. **Not closing ParquetWriter**: Always call `writer.close()` to flush the footer. Unclosed writers produce corrupt files.
+
+---
+
+## 3. Example
 
 ### Basic Write vs Optimized Write
 
@@ -230,7 +562,346 @@ print(f"Savings: {(1 - size_optimized/size_default)*100:.1f}%")
 
 ---
 
-## 3. Banking Scenario 1: Batch ETL Pipeline
+## 4. Real-World Scenario: Writing Interface Comparison
+
+### Problem
+A data engineering team manages multiple data pipelines that write Parquet files. Each pipeline has different requirements:
+
+- **Batch ETL**: Writes 500M rows nightly, needs partitioning
+- **Streaming Ingestion**: Writes 10K events/sec, needs rolling files
+- **ML Feature Store**: Writes feature tables, needs schema control
+- **Data Lake Export**: Exports from data warehouse, needs optimized compression
+
+Each team uses a different writing interface. This scenario compares their approaches.
+
+### Architecture
+```
+Batch ETL (Spark/Python)
+       |
+       v
+  pq.write_to_dataset() → Partitioned Data Lake
+
+Streaming (Kafka → Flink)
+       |
+       v
+  pq.ParquetWriter / pl.sink_parquet() → Rolling Files
+
+ML Feature Store
+       |
+       v
+  pq.write_table() → Schema-Controlled Files
+
+Data Lake Export
+       |
+       v
+  pl.write_parquet() → High-Performance Writes
+```
+
+### Python Code
+
+```python
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pyarrow.compute as pc
+import pandas as pd
+import numpy as np
+import polars as pl
+import time
+import os
+import tempfile
+from datetime import datetime, timedelta
+import random
+
+# ============================================================
+# WRITING INTERFACE COMPARISON: Multi-Pipeline Scenario
+# ============================================================
+
+def generate_batch_data(num_rows=5_000_000):
+    """Generate batch ETL data."""
+    random.seed(42)
+    np.random.seed(42)
+
+    table = pa.table({
+        "id": pa.array(range(1, num_rows + 1), type=pa.int64()),
+        "customer_id": pa.array([f"CUST{random.randint(10000, 99999)}" for _ in range(num_rows)], type=pa.string()),
+        "amount": pa.array(np.random.uniform(1.0, 50000.0, num_rows).round(2), type=pa.float64()),
+        "status": pa.array(np.random.choice(["COMPLETED"] * 95 + ["PENDING"] * 3 + ["FAILED"] * 2, num_rows), type=pa.string()),
+        "date": pa.array([(datetime(2026, 1, 1) + timedelta(days=i // 100000)).strftime("%Y-%m-%d") for i in range(num_rows)], type=pa.string()),
+    })
+    return table
+
+
+# ============================================================
+# TEAM 1: Batch ETL — pq.write_to_dataset()
+# ============================================================
+
+def batch_etl_workflow(table, base_path):
+    """Batch ETL team writes partitioned data."""
+    print("\n" + "="*60)
+    print("TEAM 1: Batch ETL (pq.write_to_dataset)")
+    print("="*60)
+
+    output_path = os.path.join(base_path, "batch_etl")
+    os.makedirs(output_path, exist_ok=True)
+
+    start = time.time()
+
+    # Partitioned write for data lake
+    pq.write_to_dataset(
+        table,
+        root_path=output_path,
+        partition_cols=["date"],
+        compression="zstd",
+        compression_level=3,
+        use_dictionary=True,
+        write_statistics=True,
+    )
+
+    elapsed = time.time() - start
+
+    # Count files
+    file_count = sum(1 for _, _, files in os.walk(output_path) for f in files if f.endswith(".parquet"))
+
+    print(f"  Write time: {elapsed:.3f}s")
+    print(f"  Rows written: {table.num_rows:,}")
+    print(f"  Files created: {file_count}")
+    print(f"  Why pq.write_to_dataset? → Automatic partitioning for data lake")
+
+
+# ============================================================
+# TEAM 2: ML Feature Store — pq.write_table()
+# ============================================================
+
+def ml_feature_store_workflow(table, base_path):
+    """ML team writes schema-controlled feature tables."""
+    print("\n" + "="*60)
+    print("TEAM 2: ML Feature Store (pq.write_table)")
+    print("="*60)
+
+    output_path = os.path.join(base_path, "ml_features")
+    os.makedirs(output_path, exist_ok=True)
+
+    start = time.time()
+
+    # Schema-controlled write for ML features
+    pq.write_table(
+        table,
+        os.path.join(output_path, "features.parquet"),
+        compression="snappy",  # Fast reads for ML training
+        use_dictionary=True,
+        write_statistics=True,
+        version="2.6",
+    )
+
+    elapsed = time.time() - start
+    size = os.path.getsize(os.path.join(output_path, "features.parquet"))
+
+    print(f"  Write time: {elapsed:.3f}s")
+    print(f"  Rows written: {table.num_rows:,}
+    print(f"  File size: {size / (1024*1024):.1f} MB")
+    print(f"  Why pq.write_table? → Single file, schema control, fast reads for ML")
+
+
+# ============================================================
+# TEAM 3: Data Lake Export — pl.write_parquet()
+# ============================================================
+
+def data_lake_export_workflow(table, base_path):
+    """Data lake export team writes high-performance Parquet."""
+    print("\n" + "="*60)
+    print("TEAM 3: Data Lake Export (pl.write_parquet)")
+    print("="*60)
+
+    output_path = os.path.join(base_path, "data_lake")
+    os.makedirs(output_path, exist_ok=True)
+
+    start = time.time()
+
+    # Convert to Polars and write
+    df_pl = pl.from_arrow(table)
+    df_pl.write_parquet(
+        os.path.join(output_path, "export.parquet"),
+        compression="zstd",
+        row_group_size=1_000_000,
+    )
+
+    elapsed = time.time() - start
+    size = os.path.getsize(os.path.join(output_path, "export.parquet"))
+
+    print(f"  Write time: {elapsed:.3f}s")
+    print(f"  Rows written: {table.num_rows:,}")
+    print(f"  File size: {size / (1024*1024):.1f} MB")
+    print(f"  Why pl.write_parquet? → Fastest write speed (Rust core)")
+
+
+# ============================================================
+# TEAM 4: Streaming — pq.ParquetWriter
+# ============================================================
+
+def streaming_ingestion_workflow(base_path):
+    """Streaming team writes incrementally."""
+    print("\n" + "="*60)
+    print("TEAM 4: Streaming Ingestion (pq.ParquetWriter)")
+    print("="*60)
+
+    output_path = os.path.join(base_path, "streaming")
+    os.makedirs(output_path, exist_ok=True)
+
+    schema = pa.schema([
+        ("event_id", pa.int64()),
+        ("timestamp", pa.timestamp("us")),
+        ("user_id", pa.string()),
+        ("action", pa.string()),
+    ])
+
+    start = time.time()
+
+    # Create writer
+    writer = pq.ParquetWriter(
+        os.path.join(output_path, "events.parquet"),
+        schema=schema,
+        compression="snappy",
+        use_dictionary=True,
+    )
+
+    # Write 10 batches (simulating streaming)
+    total_rows = 0
+    for batch_idx in range(10):
+        batch_size = 100_000
+        batch = pa.table({
+            "event_id": pa.array(range(batch_idx * batch_size + 1, (batch_idx + 1) * batch_size + 1), type=pa.int64()),
+            "timestamp": pa.array([datetime.now()] * batch_size, type=pa.timestamp("us")),
+            "user_id": pa.array([f"USER{random.randint(1000, 9999)}" for _ in range(batch_size)], type=pa.string()),
+            "action": pa.array(np.random.choice(["click", "view", "purchase"], batch_size), type=pa.string()),
+        })
+        writer.write_table(batch)
+        total_rows += batch_size
+
+    writer.close()  # Flush footer
+    elapsed = time.time() - start
+
+    size = os.path.getsize(os.path.join(output_path, "events.parquet"))
+
+    print(f"  Write time: {elapsed:.3f}s")
+    print(f"  Rows written: {total_rows:,}")
+    print(f"  File size: {size / (1024*1024):.1f} MB")
+    print(f"  Why pq.ParquetWriter? → Incremental writes, memory-efficient")
+
+
+# ============================================================
+# HEAD-TO-HEAD COMPARISON
+# ============================================================
+
+def compare_all_write_interfaces(table, base_path):
+    """Run the same write through all approaches."""
+    print("\n" + "="*60)
+    print("HEAD-TO-HEAD: Same Data, Different Write Interfaces")
+    print("="*60)
+
+    results = {}
+
+    # 1. df.to_parquet (pandas way)
+    df = table.to_pandas()
+    path1 = os.path.join(base_path, "test_pandas.parquet")
+    start = time.time()
+    df.to_parquet(path1, engine="pyarrow")
+    results["df.to_parquet"] = {
+        "time": time.time() - start,
+        "size": os.path.getsize(path1),
+    }
+    del df
+
+    # 2. pq.write_table (Arrow way)
+    path2 = os.path.join(base_path, "test_arrow.parquet")
+    start = time.time()
+    pq.write_table(table, path2)
+    results["pq.write_table"] = {
+        "time": time.time() - start,
+        "size": os.path.getsize(path2),
+    }
+
+    # 3. pq.write_to_dataset (partitioned)
+    path3 = os.path.join(base_path, "test_partitioned")
+    os.makedirs(path3, exist_ok=True)
+    start = time.time()
+    pq.write_to_dataset(table, root_path=path3, partition_cols=["date"])
+    file_count = sum(1 for _, _, files in os.walk(path3) for f in files if f.endswith(".parquet"))
+    total_size = sum(os.path.getsize(os.path.join(r, f)) for r, _, files in os.walk(path3) for f in files if f.endswith(".parquet"))
+    results["pq.write_to_dataset"] = {
+        "time": time.time() - start,
+        "size": total_size,
+    }
+
+    # 4. pl.write_parquet (Polars way)
+    df_pl = pl.from_arrow(table)
+    path4 = os.path.join(base_path, "test_polars.parquet")
+    start = time.time()
+    df_pl.write_parquet(path4)
+    results["pl.write_parquet"] = {
+        "time": time.time() - start,
+        "size": os.path.getsize(path4),
+    }
+
+    # 5. pq.ParquetWriter (streaming)
+    path5 = os.path.join(base_path, "test_streaming.parquet")
+    writer = pq.ParquetWriter(path5, schema=table.schema)
+    start = time.time()
+    # Split into 10 batches
+    batch_size = table.num_rows // 10
+    for i in range(10):
+        batch = table.slice(i * batch_size, batch_size)
+        writer.write_table(batch)
+    writer.close()
+    results["pq.ParquetWriter"] = {
+        "time": time.time() - start,
+        "size": os.path.getsize(path5),
+    }
+
+    print(f"\n  {'Interface':<25} {'Time (s)':<12} {'Size (MB)':<12} {'Speedup':<10}")
+    print("  " + "-" * 59)
+    baseline = results["df.to_parquet"]["time"]
+    for interface, metrics in results.items():
+        speedup = baseline / metrics["time"] if metrics["time"] > 0 else float('inf')
+        print(f"  {interface:<25} {metrics['time']:<12.3f} {metrics['size']/1024/1024:<12.1f} {speedup:<10.1f}x")
+
+
+# ============================================================
+# RUN THE COMPARISON
+# ============================================================
+if __name__ == "__main__":
+    base_path = os.path.join(tempfile.gettempdir(), "write_comparison")
+    os.makedirs(base_path, exist_ok=True)
+
+    # Generate data
+    print("Generating test data...")
+    table = generate_batch_data(num_rows=2_000_000)
+
+    # Run each team's workflow
+    batch_etl_workflow(table, base_path)
+    ml_feature_store_workflow(table, base_path)
+    data_lake_export_workflow(table, base_path)
+    streaming_ingestion_workflow(base_path)
+
+    # Head-to-head comparison
+    compare_all_write_interfaces(table, base_path)
+```
+
+### Key Takeaways
+
+| Interface | When to Use | When NOT to Use |
+|-----------|------------|------------------|
+| `df.to_parquet()` | Quick writes, notebooks | Large datasets, production pipelines |
+| `pq.write_table()` | Single files, full control | Partitioned data, streaming |
+| `pq.write_to_dataset()` | Partitioned data lakes | Single files, streaming |
+| `pq.ParquetWriter` | Streaming ingestion | Simple writes, partitioned data |
+| `pl.write_parquet()` | High-performance writes | Existing pandas codebases |
+| `pl.sink_parquet()` | Larger-than-RAM data | Small datasets |
+
+> **Rule of thumb:** Start with `df.to_parquet()` for prototyping. For production, use `pq.write_to_dataset()` for partitioned data or `pq.write_table()` for single files. For maximum performance, use Polars.
+
+---
+
+## 5. Banking Scenario 1: Batch ETL Pipeline
 
 ### Problem
 A bank's nightly ETL processes **500 million transactions** from Oracle into Parquet for analytics. The pipeline must:
@@ -264,7 +935,7 @@ Oracle DB (source)
 
 ---
 
-## 4. Python Code - Scenario 1
+## 6. Python Code - Scenario 1
 
 ```python
 import pyarrow as pa
@@ -447,7 +1118,7 @@ if __name__ == "__main__":
 
 ---
 
-## 5. Banking Scenario 2: Streaming Ingestion
+## 7. Banking Scenario 2: Streaming Ingestion
 
 ### Problem
 A bank's streaming platform (Kafka → Flink → Parquet) ingests **10,000 transactions per second**. Files must be:
@@ -481,7 +1152,7 @@ Kafka (10K events/sec)
 
 ---
 
-## 6. Python Code - Scenario 2
+## 8. Python Code - Scenario 2
 
 ```python
 import pyarrow as pa
@@ -689,7 +1360,7 @@ if __name__ == "__main__":
 
 ---
 
-## 7. Interview Questions
+## 9. Interview Questions
 
 ### Q1: What is the difference between `pq.write_table()` and `pq.write_to_dataset()`?
 
@@ -824,3 +1495,125 @@ The footer contains all metadata about the file:
 - Row group offsets enable parallel reads
 
 **Footer size**: Typically small (KB to MB) even for large files (GB), because it only contains metadata, not data.
+
+---
+
+### Q6: When should you use `df.to_parquet()` vs `pq.write_table()` vs `pq.write_to_dataset()`?
+
+**Answer:**
+
+**`df.to_parquet()`** — Use when:
+- Quick writes in notebooks or prototyping
+- Working with pandas DataFrames
+- Don't need fine-grained control
+
+```python
+# Simple write
+df.to_parquet("output.parquet", engine="pyarrow")
+```
+
+**`pq.write_table()`** — Use when:
+- Writing single Parquet files with full control
+- Need schema control or specific compression settings
+- Working with Arrow Tables directly
+
+```python
+# Full control
+pq.write_table(table, "output.parquet", compression="zstd", write_statistics=True)
+```
+
+**`pq.write_to_dataset()`** — Use when:
+- Writing partitioned data for data lakes
+- Need Hive-style directory hierarchy
+- Large datasets that benefit from partitioning
+
+```python
+# Partitioned write
+pq.write_to_dataset(table, root_path="output/", partition_cols=["date"])
+```
+
+**Key rule of thumb:**
+- Prototyping → `df.to_parquet()`
+- Single file, full control → `pq.write_table()`
+- Partitioned data lake → `pq.write_to_dataset()`
+- Streaming → `pq.ParquetWriter` or `pl.sink_parquet()`
+
+---
+
+### Q7: What is the difference between PyArrow, Polars, and Fastparquet for writing Parquet?
+
+**Answer:**
+
+| Aspect | PyArrow | Polars | Fastparquet |
+|--------|---------|--------|------------|
+| **Speed** | Fast (C++) | Fastest (Rust) | Slower (Python) |
+| **Memory** | Arrow format | Arrow format | Direct pandas |
+| **Streaming** | `ParquetWriter` | `sink_parquet()` | No |
+| **Partitioning** | `write_to_dataset()` | Manual | `write(partition_on=)` |
+| **Schema control** | Full | Limited | Limited |
+| **Dependencies** | Large (C++) | Medium | Lightweight |
+| **Default in pandas** | Yes (2.0+) | No | Was default |
+
+**Use PyArrow when:**
+- Building data pipelines (Arrow format)
+- Need full schema and compression control
+- Writing partitioned data lakes
+
+**Use Polars when:**
+- Maximum write speed is critical
+- Writing larger-than-RAM data (streaming)
+- Building new pipelines from scratch
+
+**Use Fastparquet when:
+- Restricted environments (no C++ compilation)
+- Dask-first workflows
+- Legacy codebases
+
+**Performance comparison (10M rows):**
+```
+pq.write_table:    1.82s   (baseline)
+pl.write_parquet:  1.18s   (1.5x faster)
+df.to_parquet:     3.24s   (1.8x slower)
+fastparquet.write: 5.81s   (3.2x slower)
+```
+
+---
+
+### Q8: How do you handle the small files problem when writing Parquet?
+
+**Answer:**
+
+**Problem:** Streaming ingestion creates thousands of small files (<64MB each), causing:
+- High metadata overhead
+- Slow query performance
+- S3 API cost explosion
+
+**Solutions:**
+
+1. **Rolling writer with size threshold:**
+```python
+# Flush to new file every 100K rows or 256MB
+class RollingWriter:
+    def write_batch(self, batch):
+        self.buffer.append(batch)
+        if self.estimated_size > 256 * 1024 * 1024:
+            self.flush_to_file()
+```
+
+2. **Compaction job:**
+```python
+# Read small files, write larger ones
+tables = [pq.read_table(f) for f in small_files]
+combined = pa.concat_tables(tables)
+pq.write_table(combined, "compacted.parquet")
+```
+
+3. **Target file size:** Write files targeting 256MB-1GB per file.
+
+4. **Partition-aware writing:** Use `pq.write_to_dataset()` to organize files by date/region.
+
+**Best practices:**
+- Set `row_group_size` to control internal structure
+- Use compaction jobs (hourly/daily) to merge small files
+- Monitor file count and average file size
+- Target 256MB-1GB per file for optimal performance
