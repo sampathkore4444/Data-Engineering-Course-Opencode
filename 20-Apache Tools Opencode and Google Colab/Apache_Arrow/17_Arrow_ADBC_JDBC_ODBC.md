@@ -337,36 +337,36 @@ Database (Columnar)  →  gRPC (Arrow Batches)  →  Client (Arrow Table)
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    Arrow Flight Server                   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  Flight Producer (implements Flight API)         │   │
-│  │  ┌─────────────────────────────────────────┐   │   │
-│  │  │  DoGet() - Fetch data by Ticket          │   │   │
-│  │  │  DoPut() - Upload data                   │   │   │
-│  │  │  DoAction() - Execute custom actions      │   │   │
-│  │  │  ListFlights() - List available data      │   │   │
-│  │  └─────────────────────────────────────────┘   │   │
-│  └─────────────────────────────────────────────────┘   │
+│                    Arrow Flight Server                  │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  Flight Producer (implements Flight API)        │    │
+│  │  ┌─────────────────────────────────────────┐    │    │
+│  │  │  DoGet() - Fetch data by Ticket         │    │    │
+│  │  │  DoPut() - Upload data                  │    │    │
+│  │  │  DoAction() - Execute custom actions    │    │    │
+│  │  │  ListFlights() - List available data    │    │    │
+│  │  └─────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────┘    │
 │                         │                               │
 │                         ▼                               │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  Data Source (Database, Parquet files, etc.)     │   │
-│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  Data Source (Database, Parquet files, etc.)    │    │
+│  └─────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
                            │
                            │ gRPC + Arrow Batches
                            ▼
 ┌─────────────────────────────────────────────────────────┐
-│                    Arrow Flight Client                   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │  Flight Client API                              │   │
-│  │  ┌─────────────────────────────────────────┐   │   │
-│  │  │  get() - Fetch data                      │   │   │
-│  │  │  upload() - Send data                    │   │   │
-│  │  │  do_action() - Execute actions           │   │   │
-│  │  │  list_flights() - List available data    │   │   │
-│  │  └─────────────────────────────────────────┘   │   │
-│  └─────────────────────────────────────────────────┘   │
+│                    Arrow Flight Client                  │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  Flight Client API                              │    │
+│  │  ┌─────────────────────────────────────────┐    │    │
+│  │  │  get() - Fetch data                     │    │    │
+│  │  │  upload() - Send data                   │    │    │
+│  │  │  do_action() - Execute actions          │    │    │
+│  │  │  list_flights() - List available data   │    │    │
+│  │  └─────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -432,40 +432,70 @@ df = table.to_pandas()
 
 Apache Arrow Flight SQL **extends Arrow Flight** by providing a standardized interface for SQL-based interactions with databases. This means developers can benefit from Arrow's high-speed data transfers while maintaining a familiar SQL interface.
 
+### Arrow Flight vs Flight SQL: What's the Difference?
+
+| | Arrow Flight | Arrow Flight SQL |
+|---|---|---|
+| **What** | Generic data transfer framework | SQL-specific protocol on top of Flight |
+| **You define** | Your own endpoints & semantics | Nothing — standard is pre-defined |
+| **Use case** | Transfer any columnar data | Execute SQL queries + get metadata |
+| **Client needs** | Custom logic per server | Same client works with any Flight SQL server |
+| **Analogy** | gRPC | SQL API on top of gRPC |
+
+**Arrow Flight** is the **transport/RPC framework** for transferring columnar data over a network. It's generic — it doesn't know anything about SQL. You build the API yourself by defining endpoints like `do_get`, `do_put`, etc. You can serve anything: Parquet files, raw Arrow data, images — it's your choice.
+
+```python
+# Flight: you define what each endpoint does
+def do_get(self, context, ticket):
+    filepath = ticket.ticket.decode()  # your convention
+    table = pq.read_table(filepath)
+    return flight.RecordBatchStream(table)
+```
+
+**Arrow Flight SQL** is a **standardized SQL layer** built on top of Flight. It gives you a common set of SQL operations so every database speaks the same language — `executeQuery`, `getCatalogs`, `getSchemas`, `getTables`, `prepareStatement`, etc. Any Flight SQL client can talk to any Flight SQL server with no custom protocol needed.
+
+```python
+# Flight SQL: standard SQL commands work out of the box
+reader = client.execute("SELECT * FROM transactions")  # standardized
+catalogs = client.get_catalogs()                        # standardized
+```
+
+**TL;DR:** Flight is the transport. Flight SQL is a standard protocol that rides on that transport to give you SQL access to any compatible database.
+
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              Arrow Flight SQL Architecture               │
+│              Arrow Flight SQL Architecture              │
 │                                                         │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │              Flight SQL Client                   │   │
-│  │  ┌─────────────────────────────────────────┐   │   │
-│  │  │  executeQuery(sql)                       │   │   │
-│  │  │  getSchema(catalog, table)               │   │   │
-│  │  │  prepareStatement(sql)                   │   │   │
-│  │  └─────────────────────────────────────────┘   │   │
-│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │              Flight SQL Client                  │    │
+│  │  ┌─────────────────────────────────────────┐    │    │
+│  │  │  executeQuery(sql)                      │    │    │
+│  │  │  getSchema(catalog, table)              │    │    │
+│  │  │  prepareStatement(sql)                  │    │    │
+│  │  └─────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────┘    │
 │                         │                               │
 │                         ▼                               │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │           Arrow Flight Transport                 │   │
-│  │         (gRPC + Arrow Batches)                   │   │
-│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │           Arrow Flight Transport                │    │
+│  │         (gRPC + Arrow Batches)                  │    │
+│  └─────────────────────────────────────────────────┘    │
 │                         │                               │
 │                         ▼                               │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │              Flight SQL Server                   │   │
-│  │  ┌─────────────────────────────────────────┐   │   │
-│  │  │  ExecuteQuery → Arrow Result             │   │   │
-│  │  │  GetExportedKeys → Metadata              │   │   │
-│  │  │  CreatePreparedStatement → Cached Plan   │   │   │
-│  │  └─────────────────────────────────────────┘   │   │
-│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │              Flight SQL Server                  │    │
+│  │  ┌─────────────────────────────────────────┐    │    │
+│  │  │  ExecuteQuery → Arrow Result            │    │    │
+│  │  │  GetExportedKeys → Metadata             │    │    │
+│  │  │  CreatePreparedStatement → Cached Plan  │    │    │
+│  │  └─────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────┘    │
 │                         │                               │
 │                         ▼                               │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │              Database Engine                     │   │
-│  │         (DuckDB, PostgreSQL, etc.)              │   │
-│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │              Database Engine                    │    │
+│  │         (DuckDB, PostgreSQL, etc.)              │    │
+│  └─────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -504,27 +534,228 @@ Unlike traditional database protocols, Flight SQL enables direct execution of SQ
 ```
 Client                          Flight SQL Server
   │                                   │
-  │  1. GetCatalogs()                │
-  │  ──────────────────────────────► │
-  │  ◄────────────────────────────── │
-  │  [Catalog list as Arrow Table]   │
+  │  1. GetCatalogs()                 │
+  │  ──────────────────────────────►  │
+  │  ◄──────────────────────────────  │
+  │  [Catalog list as Arrow Table]    │
   │                                   │
-  │  2. GetSchemas(catalog)          │
-  │  ──────────────────────────────► │
-  │  ◄────────────────────────────── │
-  │  [Schema list as Arrow Table]    │
+  │  2. GetSchemas(catalog)           │
+  │  ──────────────────────────────►  │
+  │  ◄──────────────────────────────  │
+  │  [Schema list as Arrow Table]     │
   │                                   │
-  │  3. GetTables(schema)            │
-  │  ──────────────────────────────► │
-  │  ◄────────────────────────────── │
-  │  [Table list as Arrow Table]     │
+  │  3. GetTables(schema)             │
+  │  ──────────────────────────────►  │
+  │  ◄──────────────────────────────  │
+  │  [Table list as Arrow Table]      │
   │                                   │
-  │  4. ExecuteQuery(sql)            │
-  │  ──────────────────────────────► │
-  │  ◄────────────────────────────── │
-  │  [Query result as Arrow Batches] │
+  │  4. ExecuteQuery(sql)             │
+  │  ──────────────────────────────►  │
+  │  ◄──────────────────────────────  │
+  │  [Query result as Arrow Batches]  │
   │                                   │
 ```
+
+### Flight SQL Example: DuckDB Backend
+
+The following example demonstrates a complete Arrow Flight SQL workflow using DuckDB as the backend database. It shows how to start a Flight SQL server, connect a client, execute SQL queries, retrieve metadata, and work with prepared statements — all through Arrow-native transports.
+
+```python
+import pyarrow as pa
+import pyarrow.flight as flight
+import pyarrow.flight.sql as flight_sql
+import duckdb
+import time
+
+# ============================================================
+# Flight SQL Server: Wraps DuckDB with a Flight SQL interface
+# ============================================================
+
+class DuckDBFlightSqlServer(flight_sql.FlightSqlServerBase):
+    """A Flight SQL server backed by DuckDB.
+
+    This server implements the FlightSqlProducer interface so that
+    any Flight SQL client can send SQL queries and receive results
+    as Arrow RecordBatches — no row conversion needed.
+    """
+
+    def __init__(self, db_path=":memory:"):
+        super().__init__()
+        self.db = duckdb.connect(db_path)
+
+    # ── Catalog / Schema / Table metadata ──────────────────────
+    def get_flight_info(self, context, descriptor):
+        """Handle any descriptor — for SQL strings we run the
+        query and return the result schema plus a ticket so the
+        client can later fetch the actual data."""
+        handle = descriptor.command
+        if handle is not None:
+            # Pure descriptor (catalog / schema / table list) falls
+            # through to the default FlightSQL implementation which
+            # delegates to the metadata methods below.
+            pass
+        return super().get_flight_info(context, descriptor)
+
+    def _query(self, sql: str) -> pa.RecordBatchReader:
+        """Execute SQL and return an Arrow RecordBatchReader."""
+        result = self.db.execute(sql)
+        arrow_table = result.fetch_arrow_table()
+        return pa.RecordBatchReader.from_batches(
+            arrow_table.schema,
+            arrow_table.to_batches(),
+        )
+
+    # ── Catalog operations ─────────────────────────────────────
+    def get_catalogs(self, context):
+        """Return all catalogs as an Arrow Table."""
+        reader = self._query(
+            "SELECT DISTINCT catalog_name FROM information_schema.schemata"
+        )
+        return flight_sql.Catalogs(
+            catalog_name=reader.read_all().column("catalog_name")
+        )
+
+    def get_schemas(self, context, catalog, filter=None):
+        """Return all schemas for a given catalog."""
+        reader = self._query(
+            "SELECT DISTINCT schema_name FROM information_schema.schemata"
+        )
+        return flight_sql.Schemas(
+            schema_name=reader.read_all().column("schema_name")
+        )
+
+    def get_tables(self, context, catalog, schema_pattern,
+                   table_name_pattern, table_types=None, filter=None):
+        """Return tables matching the pattern."""
+        reader = self._query(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'main'"
+        )
+        return flight_sql.TableTypes(
+            table_name=reader.read_all().column("table_name")
+        )
+
+    # ── Query execution ────────────────────────────────────────
+    def do_get(self, context, ticket):
+        """Fetch data for a ticket.  The ticket holds the SQL
+        string that was prepared by executeQuery."""
+        sql = ticket.ticket.decode()
+        return self._query(sql)
+
+    def do_put(self, context, reader, descriptor):
+        """Accept an Arrow stream and ingest it into a table."""
+        table = reader.read_all()
+        self.db.execute("DROP TABLE IF EXISTS uploaded")
+        self.db.execute("CREATE TABLE uploaded AS SELECT * FROM table")
+        return flight.FlightMetadata(b"OK")
+
+    # ── Prepared statements ────────────────────────────────────
+    def prepare_statement(self, context, query, descriptor=None):
+        """Cache a query plan for repeated execution."""
+        return FlightSqlPreparedStatement(self, query)
+
+
+class FlightSqlPreparedStatement:
+    """Minimal prepared statement wrapper."""
+    def __init__(self, server, query):
+        self.server = server
+        self.query = query
+
+    def close(self):
+        pass
+
+    def execute(self):
+        return self.server._query(self.query)
+
+
+# ============================================================
+# Start the Flight SQL server
+# ============================================================
+def start_server(host="0.0.0.0", port=8825):
+    location = f"grpc://{host}:{port}"
+    server = DuckDBFlightSqlServer()
+    server.init(location)
+    print(f"Flight SQL server running on {location}")
+    return server
+
+
+# ============================================================
+# Flight SQL Client: interact via SQL over Arrow Flight
+# ============================================================
+def run_client(host="localhost", port=8825):
+    location = f"grpc://{host}:{port}"
+    client = flight_sql.FlightSqlConnection(location)
+
+    print(f"\nConnected to Flight SQL server at {location}\n")
+
+    # ── 1. List catalogs ───────────────────────────────────────
+    print("--- Catalogs ---")
+    catalogs = client.get_catalogs()
+    print(catalogs)
+
+    # ── 2. List schemas ────────────────────────────────────────
+    print("\n--- Schemas ---")
+    schemas = client.get_schemas()
+    print(schemas)
+
+    # ── 3. Execute SQL and fetch Arrow Table ────────────────────
+    print("\n--- Execute Query ---")
+    query = """
+        SELECT category, SUM(amount) AS total, COUNT(*) AS cnt
+        FROM (
+            SELECT
+                i AS id,
+                random() * 10000 AS amount,
+                ['A', 'B', 'C', 'D'][((i % 4) + 1)] AS category
+            FROM generate_series(1, 1_000_000) t(i)
+        )
+        GROUP BY category
+        ORDER BY category
+    """
+
+    start = time.time()
+    reader = client.execute(query)
+    table = reader.read_all()          # zero-copy Arrow Table
+    elapsed = time.time() - start
+
+    print(f"Query returned {table.num_rows:,} rows in {elapsed:.3f}s\n")
+    print(table.to_pandas())           # convert only if needed
+
+    # ── 4. Prepared statement (repeated query) ─────────────────
+    print("\n--- Prepared Statement ---")
+    stmt = client.prepare_statement(query)
+    reader = stmt.execute()
+    table2 = reader.read_all()
+    print(f"Prepared statement returned {table2.num_rows:,} rows")
+    stmt.close()
+
+    client.close()
+
+
+# ============================================================
+# Main: run server in background and client in foreground
+# ============================================================
+if __name__ == "__main__":
+    import threading
+
+    # Start server in a daemon thread so the script can exit cleanly
+    server = start_server()
+    server_thread = threading.Thread(
+        target=server.serve, daemon=True
+    )
+    server_thread.start()
+    time.sleep(1)  # let the server start
+
+    # Run client
+    run_client()
+```
+
+**Key takeaways from the example:**
+
+1. **SQL over Arrow Flight** — the client sends plain SQL; the server returns Arrow RecordBatches directly, with zero row-based serialization.
+2. **Metadata is cheap** — `get_catalogs()`, `get_schemas()`, and `get_tables()` return Arrow Tables, so browsing database structure is fast.
+3. **Prepared statements** cache query plans for repeated execution, reducing planning overhead.
+4. **`do_put` for ingestion** — clients can stream Arrow data into the server for bulk uploads.
 
 ---
 
@@ -654,7 +885,7 @@ ADBC addresses key gaps in existing database APIs:
 
 | Technology | Role | Analogy |
 |------------|------|---------|
-| **Arrow Flight** | Transport protocol for columnar data | HTTP for columnar data |
+| **Arrow Flight** | Transport protocol for columnar data | gRPC for columnar data |
 | **Arrow Flight SQL** | SQL interface over Flight | JDBC but columnar |
 | **ADBC** | Unified programming API | JDBC/ODBC replacement |
 
@@ -1006,7 +1237,7 @@ if __name__ == "__main__":
 | **ADBC** | Programming API | Unified database access (can use Flight SQL or legacy drivers) |
 
 **Analogy:**
-- Arrow Flight = HTTP for columnar data
+- Arrow Flight = gRPC for columnar data
 - Flight SQL = JDBC but columnar
 - ADBC = JDBC/ODBC replacement
 
