@@ -6,10 +6,13 @@
 3. [State Management](#3-state-management)
 4. [Lambda vs Kappa Architecture](#4-lambda-vs-kappa-architecture)
 5. [Real-World Streaming Scenarios](#5-real-world-streaming-scenarios)
-6. [Banking Examples](#6-banking-examples)
-7. [E-Commerce Examples](#7-e-commerce-examples)
-8. [Hands-On Exercises](#8-hands-on-exercises)
-9. [Interview Questions](#9-interview-questions)
+   - [Scenario 1: Real-Time Transaction Monitoring](#scenario-1-real-time-transaction-monitoring)
+   - [Scenario 2: Real-Time AML/CFT Monitoring](#scenario-2-real-time-amlcft-monitoring)
+   - [Scenario 3: Real-Time Customer 360° Updates](#scenario-3-real-time-customer-360-updates)
+   - [Scenario 4: Real-Time Regulatory Reporting](#scenario-4-real-time-regulatory-reporting)
+   - [Scenario 5: Real-Time Payment Processing](#scenario-5-real-time-payment-processing)
+6. [Hands-On Exercises](#6-hands-on-exercises)
+7. [Interview Questions](#7-interview-questions)
 
 ---
 
@@ -655,82 +658,967 @@ Single Stream:
 
 ## 5. Real-World Streaming Scenarios
 
-### Scenario 1: Real-Time Fraud Detection
+### Overview
 
-```
-Transaction Events
-        |
-        v
-+------------------+
-|    Kafka         |
-| (Buffer/Queue)   |
-+------------------+----+
-        |              |
-        v              v
-+----------------+  +----------------+
-| Flink Stream   |  | Spark          |
-| Processing     |  | Streaming      |
-| - Enrichment   |  | - Aggregation  |
-| - ML Scoring   |  | - Reporting    |
-| - Rule Engine  |  |                |
-+--------+-------+  +--------+-------+
-         |                   |
-         v                   v
-+----------------+  +----------------+
-| Alert System   |  | Data Lake      |
-| (Real-time     |  | (Batch         |
-|  notifications)|  |  analytics)    |
-+----------------+  +----------------+
-```
-
-### Scenario 2: E-Commerce Real-Time Inventory
-
-```
-Web Clicks --> Kafka --> Flink --> Real-time Inventory
-                                    |
-                                    +--> Website Display
-                                    |
-                                    +--> Alert System (Low Stock)
-                                    |
-                                    +--> Data Lake (Analytics)
-```
+This section presents **5 complete banking streaming scenarios** that demonstrate how to implement real-time data processing for financial institutions. Each scenario includes the business context, streaming architecture, implementation code, and business outcomes.
 
 ---
 
-## 6. Banking Examples
+### Scenario 1: Real-Time Transaction Monitoring
 
-### Example 1: Real-Time Transaction Monitoring
+> **Business Context:** A bank processes 2M+ card transactions daily and needs to monitor them in real-time for fraud detection and compliance.
 
-```java
-// Flink streaming job for transaction monitoring
-DataStream<Transaction> transactions = env
-    .addSource(new KafkaSource<>("transactions"))
-    .assignTimestampsAndWatermarks(
-        WatermarkStrategy.<Transaction>forBoundedOutOfOrderness(Duration.ofSeconds(5))
-            .withTimestampAssigner((event, timestamp) -> event.getTimestamp())
-    );
+#### Streaming Architecture
 
-// Detect suspicious patterns
-DataStream<Alert> alerts = transactions
-    .keyBy(Transaction::getCustomerId)
-    .window(SlidingEventTimeWindows.of(Time.minutes(5), Time.minutes(1)))
-    .aggregate(new TransactionAggregator())
-    .filter(agg -> agg.getTotalAmount() > 10000 || agg.getCount() > 10)
-    .map(agg -> new Alert(agg.getCustomerId(), "SUSPICIOUS_ACTIVITY", agg));
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              REAL-TIME TRANSACTION MONITORING                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA SOURCES                                  │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Card     │  │ ATM      │  │ Mobile   │  │ Wire     │       │  │
+│   │  │ Payments │  │ Transfers│  │ Banking  │  │ Transfers│       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE KAFKA                                  │  │
+│   │                    (Event Streaming Platform)                    │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ card-    │  │ atm-     │  │ mobile-  │  │ wire-    │       │  │
+│   │  │ txn-     │  │ txn-     │  │ pay-     │  │ transfer-│       │  │
+│   │  │ stream   │  │ stream   │  │ stream   │  │ stream   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE FLINK                                  │  │
+│   │                    (Stream Processing)                           │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  1. ENRICHMENT                                               │ │  │
+│   │  │     - Customer profile lookup                               │ │  │
+│   │  │     - Account balance check                                 │ │  │
+│   │  │     - Historical pattern analysis                           │ │  │
+│   │  │                                                            │ │  │
+│   │  │  2. RULE ENGINE                                              │ │  │
+│   │  │     - Velocity checks (transactions per hour)              │ │  │
+│   │  │     - Amount thresholds                                     │ │  │
+│   │  │     - Geographic anomalies                                  │ │  │
+│   │  │                                                            │ │  │
+│   │  │  3. ML SCORING                                               │ │  │
+│   │  │     - Fraud probability calculation                         │ │  │
+│   │  │     - Risk score generation                                 │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  OUTPUT STREAMS                                              │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ Fraud    │  │ Alert    │  │ Real-time│  │ Data     │ │ │  │
+│   │  │  │ Alerts   │  │ System   │  │ Dashboard│  │ Lake     │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Example 2: Real-Time P&L Calculation
+#### Implementation Code
 
-```sql
--- Kafka Streams SQL
-SELECT 
-    account_id,
-    SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE 0 END) as credits,
-    SUM(CASE WHEN transaction_type = 'DEBIT' THEN amount ELSE 0 END) as debits,
-    SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE -amount END) as net_pnl
-FROM transactions
-GROUP BY account_id;
+```python
+from pyflink.table import EnvironmentSettings, TableEnvironment
+from pyflink.table.expressions import col, lit, call
+from datetime import datetime, timedelta
+
+# Initialize Flink Table Environment
+env_settings = EnvironmentSettings.in_streaming_mode()
+t_env = TableEnvironment.create(env_settings)
+
+# ============================================================
+# 1. CREATE KAFKA SOURCE TABLE
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE card_transactions (
+        transaction_id STRING,
+        card_number STRING,
+        customer_id STRING,
+        amount DECIMAL(12,2),
+        merchant_name STRING,
+        merchant_category STRING,
+        country STRING,
+        transaction_time TIMESTAMP(3),
+        WATERMARK FOR transaction_time AS transaction_time - INTERVAL '5' SECOND
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'card-transactions',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'properties.group.id' = 'flink-txn-monitor',
+        'scan.startup.mode' = 'latest-offset',
+        'format' = 'json'
+    )
+""")
+
+# ============================================================
+# 2. CREATE SINK TABLE FOR ALERTS
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE fraud_alerts (
+        alert_id STRING,
+        transaction_id STRING,
+        customer_id STRING,
+        alert_type STRING,
+        risk_score DECIMAL(5,4),
+        alert_time TIMESTAMP(3),
+        details STRING
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'fraud-alerts',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+# ============================================================
+# 3. REAL-TIME FRAUD DETECTION QUERY
+# ============================================================
+
+t_env.execute_sql("""
+    INSERT INTO fraud_alerts
+    SELECT 
+        GENERATE_UUID() as alert_id,
+        transaction_id,
+        customer_id,
+        'VELOCITY_CHECK' as alert_type,
+        0.8 as risk_score,
+        transaction_time as alert_time,
+        CONCAT('High velocity: ', CAST(cnt AS STRING), ' txns in 5 min') as details
+    FROM (
+        SELECT 
+            transaction_id,
+            customer_id,
+            transaction_time,
+            COUNT(*) OVER (
+                PARTITION BY customer_id 
+                ORDER BY transaction_time 
+                RANGE BETWEEN INTERVAL '5' MINUTE PRECEDING AND CURRENT ROW
+            ) as cnt
+        FROM card_transactions
+    )
+    WHERE cnt > 5  -- More than 5 transactions in 5 minutes
+""")
+
+# ============================================================
+# 4. REAL-TIME AGGREGATION BY MERCHANT CATEGORY
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE merchant_category_stats (
+        category STRING,
+        window_start TIMESTAMP(3),
+        window_end TIMESTAMP(3),
+        total_amount DECIMAL(15,2),
+        transaction_count BIGINT,
+        avg_amount DECIMAL(12,2)
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'merchant-stats',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+t_env.execute_sql("""
+    INSERT INTO merchant_category_stats
+    SELECT 
+        merchant_category,
+        TUMBLE_START(transaction_time, INTERVAL '1' MINUTE) as window_start,
+        TUMBLE_END(transaction_time, INTERVAL '1' MINUTE) as window_end,
+        SUM(amount) as total_amount,
+        COUNT(*) as transaction_count,
+        AVG(amount) as avg_amount
+    FROM card_transactions
+    GROUP BY 
+        merchant_category,
+        TUMBLE(transaction_time, INTERVAL '1' MINUTE)
+""")
 ```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Fraud detection time | 24 hours | 5 seconds | 99.99% faster |
+| Transaction monitoring | Batch (next day) | Real-time | Instant detection |
+| False positive rate | 40% | 10% | 75% reduction |
+| Monthly fraud losses | $2M | $200K | 90% reduction |
+| Alert latency | 24 hours | 5 seconds | 99.99% faster |
+
+---
+
+### Scenario 2: Real-Time AML/CFT Monitoring
+
+> **Business Context:** A bank must monitor all transactions in real-time for Anti-Money Laundering (AML) and Counter-Financing of Terrorism (CFT) compliance.
+
+#### Streaming Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              REAL-TIME AML/CFT MONITORING                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    TRANSACTION SOURCES                           │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Card     │  │ Wire     │  │ Cash     │  │ Crypto   │       │  │
+│   │  │ Payments │  │ Transfers│  │ Deposits │  │ Exchanges│       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE KAFKA                                  │  │
+│   │                    (AML Transaction Topics)                      │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ aml-     │  │ aml-     │  │ aml-     │  │ aml-     │       │  │
+│   │  │ card-    │  │ wire-    │  │ cash-    │  │ crypto-  │       │  │
+│   │  │ txn      │  │ transfer │  │ deposit  │  │ exchange │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE FLINK                                  │  │
+│   │                    (AML Stream Processing)                       │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  AML RULE ENGINE                                            │ │  │
+│   │  │                                                            │ │  │
+│   │  │  1. STRUCTURING DETECTION                                   │ │  │
+│   │  │     - Multiple transactions just below reporting threshold │ │  │
+│   │  │     - Cash deposits in $9,000-$9,999 range                 │ │  │
+│   │  │                                                            │ │  │
+│   │  │  2. VELOCITY MONITORING                                     │ │  │
+│   │  │     - Rapid movement of funds                              │ │  │
+│   │  │     - Multiple accounts same customer                      │ │  │
+│   │  │                                                            │ │  │
+│   │  │  3. GEOGRAPHIC ANOMALIES                                    │ │  │
+│   │  │     - Transactions in high-risk countries                  │ │  │
+│   │  │     - Impossible travel (same card, different countries)   │ │  │
+│   │  │                                                            │ │  │
+│   │  │  4. WATCHLIST SCREENING                                     │ │  │
+│   │  │     - OFAC sanctions list                                  │ │  │
+│   │  │     - PEP (Politically Exposed Persons)                    │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  OUTPUT STREAMS                                              │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ AML      │  │ SAR      │  │ Compliance│  │ Case     │ │ │  │
+│   │  │  │ Alerts   │  │ Reports  │  │ Dashboard │  │ Manager  │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from pyflink.table import EnvironmentSettings, TableEnvironment
+from pyflink.table.expressions import col, lit
+
+# Initialize Flink
+env_settings = EnvironmentSettings.in_streaming_mode()
+t_env = TableEnvironment.create(env_settings)
+
+# ============================================================
+# 1. CREATE AML TRANSACTION SOURCE
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE aml_transactions (
+        transaction_id STRING,
+        account_id STRING,
+        customer_id STRING,
+        transaction_type STRING,
+        amount DECIMAL(15,2),
+        currency STRING,
+        counterparty_account STRING,
+        counterparty_bank STRING,
+        country STRING,
+        transaction_time TIMESTAMP(3),
+        WATERMARK FOR transaction_time AS transaction_time - INTERVAL '10' SECOND
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'aml-transactions',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+# ============================================================
+# 2. STRUCTURING DETECTION (Smurfing)
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE structuring_alerts (
+        alert_id STRING,
+        customer_id STRING,
+        alert_type STRING,
+        total_amount DECIMAL(15,2),
+        transaction_count INT,
+        alert_time TIMESTAMP(3),
+        details STRING
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'structuring-alerts',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+t_env.execute_sql("""
+    INSERT INTO structuring_alerts
+    SELECT 
+        GENERATE_UUID() as alert_id,
+        customer_id,
+        'STRUCTURING' as alert_type,
+        SUM(amount) as total_amount,
+        COUNT(*) as transaction_count,
+        TUMBLE_END(transaction_time, INTERVAL '1' HOUR) as alert_time,
+        CONCAT('Potential structuring: ', CAST(COUNT(*) AS STRING), 
+               ' cash deposits totaling $', CAST(SUM(amount) AS STRING)) as details
+    FROM aml_transactions
+    WHERE transaction_type = 'CASH_DEPOSIT'
+      AND amount >= 9000 AND amount <= 9999
+    GROUP BY 
+        customer_id,
+        TUMBLE(transaction_time, INTERVAL '1' HOUR)
+    HAVING COUNT(*) >= 3  -- 3+ deposits in $9K-$9.9K range within 1 hour
+""")
+
+# ============================================================
+# 3. IMPOSSIBLE TRAVEL DETECTION
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE impossible_travel_alerts (
+        alert_id STRING,
+        customer_id STRING,
+        transaction1_id STRING,
+        transaction2_id STRING,
+        country1 STRING,
+        country2 STRING,
+        time_diff_minutes INT,
+        alert_time TIMESTAMP(3)
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'impossible-travel-alerts',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+# This would require a more complex Flink job with state management
+# Simplified version:
+
+t_env.execute_sql("""
+    INSERT INTO impossible_travel_alerts
+    SELECT 
+        GENERATE_UUID() as alert_id,
+        t1.customer_id,
+        t1.transaction_id as transaction1_id,
+        t2.transaction_id as transaction2_id,
+        t1.country as country1,
+        t2.country as country2,
+        CAST((UNIX_TIMESTAMP(t2.transaction_time) - UNIX_TIMESTAMP(t1.transaction_time)) / 60 AS INT) as time_diff_minutes,
+        t2.transaction_time as alert_time
+    FROM aml_transactions t1
+    JOIN aml_transactions t2 
+        ON t1.customer_id = t2.customer_id
+        AND t1.transaction_id < t2.transaction_id
+        AND t1.country != t2.country
+        AND ABS(BIGINT(t2.transaction_time) - BIGINT(t1.transaction_time)) < 3600000  -- Within 1 hour
+    WHERE t1.country IN ('US', 'GB', 'SG')  -- Major financial centers
+      AND t2.country IN ('IR', 'KP', 'SY')  -- High-risk countries
+""")
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| AML detection time | 7 days | Real-time | 99.9% faster |
+| Suspicious activity reports | 500/month | 50/month | 90% reduction |
+| False positives | 80% | 20% | 75% reduction |
+| Regulatory penalties | $1M/year | $0 | Eliminated |
+| Investigation time | 2 weeks | 2 hours | 99% faster |
+
+---
+
+### Scenario 3: Real-Time Customer 360° Updates
+
+> **Business Context:** A bank needs to maintain real-time customer profiles for personalized banking experiences.
+
+#### Streaming Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              REAL-TIME CUSTOMER 360° UPDATES                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    EVENT SOURCES                                 │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Transaction│  │ Digital  │  │ Branch   │  │ Customer │       │  │
+│   │  │ Events   │  │ Channel  │  │ Interactn│  │ Service  │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE KAFKA                                  │  │
+│   │                    (Customer Event Topics)                       │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ customer-│  │ customer-│  │ customer-│  │ customer-│       │  │
+│   │  │ txn-     │  │ digital- │  │ branch-  │  │ service- │       │  │
+│   │  │ events   │  │ events   │  │ events   │  │ events   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE FLINK                                  │  │
+│   │                    (Customer 360° Processing)                    │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  1. EVENT ENRICHMENT                                         │ │  │
+│   │  │     - Customer profile lookup                               │ │  │
+│   │  │     - Account aggregation                                   │ │  │
+│   │  │     - Product holdings                                      │ │  │
+│   │  │                                                            │ │  │
+│   │  │  2. BEHAVIORAL ANALYSIS                                     │ │  │
+│   │  │     - Transaction patterns                                  │ │  │
+│   │  │     - Digital engagement                                    │ │  │
+│   │  │     - Channel preferences                                   │ │  │
+│   │  │                                                            │ │  │
+│   │  │  3. SCORE GENERATION                                        │ │  │
+│   │  │     - Customer lifetime value                               │ │  │
+│   │  │     - Churn risk score                                      │ │  │
+│   │  │     - Cross-sell opportunity score                          │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  OUTPUT: REAL-TIME CUSTOMER PROFILE                         │ │  │
+│   │  │                                                            │ │  │
+│   │  │  - Redis cache for fast lookups                            │ │  │
+│   │  │  - Cassandra for historical data                           │ │  │
+│   │  │  - Elasticsearch for search                                │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from pyflink.table import EnvironmentSettings, TableEnvironment
+from pyflink.table.expressions import col, lit
+
+# Initialize Flink
+env_settings = EnvironmentSettings.in_streaming_mode()
+t_env = TableEnvironment.create(env_settings)
+
+# ============================================================
+# 1. CREATE CUSTOMER EVENT SOURCES
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE customer_transactions (
+        customer_id STRING,
+        account_id STRING,
+        transaction_id STRING,
+        transaction_type STRING,
+        amount DECIMAL(15,2),
+        merchant_category STRING,
+        transaction_time TIMESTAMP(3),
+        WATERMARK FOR transaction_time AS transaction_time - INTERVAL '5' SECOND
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'customer-transactions',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+# ============================================================
+# 2. REAL-TIME CUSTOMER SPENDING PATTERNS
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE customer_spending_patterns (
+        customer_id STRING,
+        window_start TIMESTAMP(3),
+        window_end TIMESTAMP(3),
+        total_spending DECIMAL(15,2),
+        transaction_count INT,
+        avg_transaction_amount DECIMAL(12,2),
+        top_category STRING,
+        unique_merchants INT
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'customer-spending-patterns',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+t_env.execute_sql("""
+    INSERT INTO customer_spending_patterns
+    SELECT 
+        customer_id,
+        TUMBLE_START(transaction_time, INTERVAL '1' HOUR) as window_start,
+        TUMBLE_END(transaction_time, INTERVAL '1' HOUR) as window_end,
+        SUM(amount) as total_spending,
+        COUNT(*) as transaction_count,
+        AVG(amount) as avg_transaction_amount,
+        -- Top category would need more complex logic
+        FIRST_VALUE(merchant_category) as top_category,
+        COUNT(DISTINCT merchant_category) as unique_merchants
+    FROM customer_transactions
+    GROUP BY 
+        customer_id,
+        TUMBLE(transaction_time, INTERVAL '1' HOUR)
+""")
+
+# ============================================================
+# 3. REAL-TIME CUSTOMER LIFETIME VALUE UPDATE
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE customer_clv_updates (
+        customer_id STRING,
+        total_transactions BIGINT,
+        total_amount DECIMAL(18,2),
+        avg_transaction_amount DECIMAL(12,2),
+        last_transaction_time TIMESTAMP(3),
+        clv_segment STRING,
+        update_time TIMESTAMP(3)
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'customer-clv-updates',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+t_env.execute_sql("""
+    INSERT INTO customer_clv_updates
+    SELECT 
+        customer_id,
+        COUNT(*) as total_transactions,
+        SUM(amount) as total_amount,
+        AVG(amount) as avg_transaction_amount,
+        MAX(transaction_time) as last_transaction_time,
+        CASE 
+            WHEN SUM(amount) > 100000 THEN 'VIP'
+            WHEN SUM(amount) > 10000 THEN 'PREMIUM'
+            ELSE 'STANDARD'
+        END as clv_segment,
+        CURRENT_TIMESTAMP as update_time
+    FROM customer_transactions
+    GROUP BY customer_id
+""")
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Customer profile update | 24 hours | Real-time | 99.9% faster |
+| Personalization accuracy | 60% | 90% | 50% improvement |
+| Cross-sell conversion | 2% | 12% | 6x improvement |
+| Customer satisfaction | 65% | 85% | 30% increase |
+| Churn prediction | 30% accurate | 80% accurate | 2.7x improvement |
+
+---
+
+### Scenario 4: Real-Time Regulatory Reporting
+
+> **Business Context:** A bank must generate and submit regulatory reports in near real-time to meet strict deadlines.
+
+#### Streaming Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              REAL-TIME REGULATORY REPORTING                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA SOURCES                                  │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Core     │  │ Cards    │  │ Loans    │  │ Treasury │       │  │
+│   │  │ Banking  │  │ System   │  │ System   │  │ System   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE KAFKA                                  │  │
+│   │                    (Regulatory Data Topics)                      │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ reg-     │  │ reg-     │  │ reg-     │  │ reg-     │       │  │
+│   │  │ capital- │  │ liquidity│  │ aml-     │  │ financial│       │  │
+│   │  │ data     │  │ -data    │  │ -data    │  │ -data    │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE FLINK                                  │  │
+│   │                    (Real-time Aggregation)                       │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  1. CAPITAL ADEQUACY CALCULATION                            │ │  │
+│   │  │     - Tier 1/2 capital computation                         │ │  │
+│   │  │     - Risk-weighted assets aggregation                     │ │  │
+│   │  │                                                            │ │  │
+│   │  │  2. LIQUIDITY MONITORING                                    │ │  │
+│   │  │     - LCR (Liquidity Coverage Ratio)                       │ │  │
+│   │  │     - NSFR (Net Stable Funding Ratio)                      │ │  │
+│   │  │                                                            │ │  │
+│   │  │  3. AML REPORTING                                           │ │  │
+│   │  │     - Suspicious activity aggregation                      │ │  │
+│   │  │     - Transaction threshold monitoring                     │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  OUTPUT STREAMS                                              │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ Capital  │  │ Liquidity│  │ AML      │  │ Financial│ │ │  │
+│   │  │  │ Report   │  │ Report   │  │ Report   │  │ Report   │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from pyflink.table import EnvironmentSettings, TableEnvironment
+from pyflink.table.expressions import col, lit
+
+# Initialize Flink
+env_settings = EnvironmentSettings.in_streaming_mode()
+t_env = TableEnvironment.create(env_settings)
+
+# ============================================================
+# 1. CREATE REGULATORY DATA SOURCE
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE regulatory_transactions (
+        transaction_id STRING,
+        account_id STRING,
+        transaction_type STRING,
+        amount DECIMAL(15,2),
+        risk_weight DECIMAL(5,4),
+        transaction_time TIMESTAMP(3),
+        WATERMARK FOR transaction_time AS transaction_time - INTERVAL '5' SECOND
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'regulatory-transactions',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+# ============================================================
+# 2. REAL-TIME CAPITAL ADEQUACY CALCULATION
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE capital_adequacy_updates (
+        calculation_time TIMESTAMP(3),
+        total_rwa DECIMAL(18,2),
+        tier1_capital DECIMAL(18,2),
+        tier2_capital DECIMAL(18,2),
+        cet1_ratio DECIMAL(8,4),
+        tier1_ratio DECIMAL(8,4),
+        total_ratio DECIMAL(8,4),
+        is_compliant BOOLEAN
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'capital-adequacy-updates',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+t_env.execute_sql("""
+    INSERT INTO capital_adequacy_updates
+    SELECT 
+        CURRENT_TIMESTAMP as calculation_time,
+        SUM(amount * risk_weight) as total_rwa,
+        5000000 as tier1_capital,  -- From capital table
+        2000000 as tier2_capital,  -- From capital table
+        (5000000 / SUM(amount * risk_weight)) * 100 as cet1_ratio,
+        ((5000000) / SUM(amount * risk_weight)) * 100 as tier1_ratio,
+        ((5000000 + 2000000) / SUM(amount * risk_weight)) * 100 as total_ratio,
+        ((5000000 + 2000000) / SUM(amount * risk_weight)) >= 8.0 as is_compliant
+    FROM regulatory_transactions
+    WHERE transaction_time >= CURRENT_TIMESTAMP - INTERVAL '1' DAY
+""")
+
+# ============================================================
+# 3. REAL-TIME LIQUIDITY MONITORING
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE liquidity_monitoring (
+        calculation_time TIMESTAMP(3),
+        hqla DECIMAL(18,2),  -- High Quality Liquid Assets
+        total_cash_outflows DECIMAL(18,2),
+        lcr_ratio DECIMAL(8,4),
+        is_compliant BOOLEAN
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'liquidity-monitoring',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Report generation time | 8 hours | 15 minutes | 97% faster |
+| Data freshness | 24 hours | 15 minutes | 99% faster |
+| Compliance score | 85% | 99% | 99% compliant |
+| Regulatory findings | 20+ per audit | < 3 per audit | 85% reduction |
+| Manual intervention | Daily | Weekly | 85% reduction |
+
+---
+
+### Scenario 5: Real-Time Payment Processing
+
+> **Business Context:** A bank needs to process instant payments (24/7) with real-time settlement.
+
+#### Streaming Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              REAL-TIME PAYMENT PROCESSING                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    PAYMENT SOURCES                                │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Mobile   │  │ Internet │  │ POS      │  │ API      │       │  │
+│   │  │ Banking  │  │ Banking  │  │ Terminals│  │ Partners │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE KAFKA                                  │  │
+│   │                    (Payment Event Topics)                        │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ payment- │  │ payment- │  │ payment- │  │ payment- │       │  │
+│   │  │ init-    │  │ valid-   │  │ process- │  │ settle-  │       │  │
+│   │  │ requests │  │ -ation   │  │ -ing     │  │ -ment    │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE FLINK                                  │  │
+│   │                    (Payment Stream Processing)                   │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  1. PAYMENT VALIDATION                                       │ │  │
+│   │  │     - Account balance check                                 │ │  │
+│   │  │     - Fraud screening                                       │ │  │
+│   │  │     - Compliance check                                      │ │  │
+│   │  │                                                            │ │  │
+│   │  │  2. PAYMENT ROUTING                                          │ │  │
+│   │  │     - Interbank routing                                     │ │  │
+│   │  │     - Settlement path selection                             │ │  │
+│   │  │     - Currency conversion                                   │ │  │
+│   │  │                                                            │ │  │
+│   │  │  3. PAYMENT SETTLEMENT                                       │ │  │
+│   │  │     - Real-time gross settlement (RTGS)                     │ │  │
+│   │  │     - Net settlement processing                             │ │  │
+│   │  │     - Reconciliation                                        │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  OUTPUT STREAMS                                              │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ Payment  │  │ Settlement│  │ Customer │  │ Merchant │ │ │  │
+│   │  │  │ Confirm  │  │ Status   │  │ Notifctn │  │ Notifctn │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from pyflink.table import EnvironmentSettings, TableEnvironment
+from pyflink.table.expressions import col, lit
+
+# Initialize Flink
+env_settings = EnvironmentSettings.in_streaming_mode()
+t_env = TableEnvironment.create(env_settings)
+
+# ============================================================
+# 1. CREATE PAYMENT REQUEST SOURCE
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE payment_requests (
+        payment_id STRING,
+        sender_account STRING,
+        receiver_account STRING,
+        amount DECIMAL(15,2),
+        currency STRING,
+        payment_type STRING,
+        reference STRING,
+        request_time TIMESTAMP(3),
+        WATERMARK FOR request_time AS request_time - INTERVAL '5' SECOND
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'payment-requests',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+# ============================================================
+# 2. REAL-TIME PAYMENT VALIDATION
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE payment_validations (
+        payment_id STRING,
+        is_valid BOOLEAN,
+        validation_errors STRING,
+        validation_time TIMESTAMP(3)
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'payment-validations',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+# ============================================================
+# 3. REAL-TIME PAYMENT AGGREGATION FOR SETTLEMENT
+# ============================================================
+
+t_env.execute_sql("""
+    CREATE TABLE payment_settlement_batch (
+        settlement_window_start TIMESTAMP(3),
+        settlement_window_end TIMESTAMP(3),
+        total_payments BIGINT,
+        total_amount DECIMAL(18,2),
+        net_position DECIMAL(18,2)
+    ) WITH (
+        'connector' = 'kafka',
+        'topic' = 'payment-settlement-batch',
+        'properties.bootstrap.servers' = 'kafka:9092',
+        'format' = 'json'
+    )
+""")
+
+t_env.execute_sql("""
+    INSERT INTO payment_settlement_batch
+    SELECT 
+        TUMBLE_START(request_time, INTERVAL '5' MINUTE) as settlement_window_start,
+        TUMBLE_END(request_time, INTERVAL '5' MINUTE) as settlement_window_end,
+        COUNT(*) as total_payments,
+        SUM(amount) as total_amount,
+        SUM(CASE WHEN payment_type = 'INCOMING' THEN amount ELSE -amount END) as net_position
+    FROM payment_requests
+    GROUP BY TUMBLE(request_time, INTERVAL '5' MINUTE)
+""")
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Payment processing time | 30 seconds | 5 seconds | 83% faster |
+| Settlement time | T+1 | Real-time | Instant settlement |
+| Payment success rate | 95% | 99.9% | 5% improvement |
+| Customer complaints | 500/day | 50/day | 90% reduction |
+| Operational cost | $1M/year | $500K/year | 50% reduction |
+
+---
+
+### Scenario Comparison Matrix
+
+| Aspect | Transaction Monitoring | AML/CFT | Customer 360° | Regulatory | Payments |
+|--------|----------------------|---------|---------------|------------|----------|
+| **Latency** | 5 seconds | Real-time | 15 minutes | 15 minutes | 5 seconds |
+| **Throughput** | 2M+ events/day | 5M+ events/day | 1M+ events/day | 10M+ events/day | 1M+ events/day |
+| **Complexity** | Medium | High | Medium | High | High |
+| **Key Technologies** | Flink, Kafka | Flink, Kafka, ML | Flink, Redis | Flink, Kafka | Flink, Kafka |
+| **Business Value** | Loss prevention | Compliance | Personalization | Compliance | Customer experience |
+| **Risk Level** | High | Critical | Medium | Critical | Critical |
 
 ---
 

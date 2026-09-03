@@ -5,6 +5,11 @@
 2. [Other Orchestration Tools](#2-other-orchestration-tools)
 3. [CI/CD for Data](#3-cicd-for-data)
 4. [Real-World Scenarios](#4-real-world-scenarios)
+   - [Scenario 1: Daily EOD Banking Pipeline](#scenario-1-daily-end-of-day-eod-banking-pipeline)
+   - [Scenario 2: Real-Time Fraud Detection](#scenario-2-real-time-fraud-detection-pipeline)
+   - [Scenario 3: Regulatory Reporting Automation](#scenario-3-regulatory-reporting-automation)
+   - [Scenario 4: Customer Onboarding Pipeline](#scenario-4-customer-onboarding-pipeline)
+   - [Scenario 5: ML Model Retraining](#scenario-5-ml-model-retraining-pipeline)
 5. [Hands-On Exercises](#5-hands-on-exercises)
 6. [Interview Questions](#6-interview-questions)
 
@@ -383,57 +388,1399 @@ resource "aws_s3_bucket" "data_lake" {
 
 ## 4. Real-World Scenarios
 
-### Scenario 1: Financial Reporting Pipeline
+### Overview
 
-```
-Daily Pipeline Flow:
-+--------+    +--------+    +--------+    +--------+    +--------+
-|Extract | -> |Validate| -> |Transform| -> |  Load  | -> | Report |
-| (6 AM) |    | (6:15) |    | (6:30)  |    | (7:00) |    | (7:30) |
-+--------+    +--------+    +---------+    +--------+    +--------+
-    |             |              |              |             |
-    v             v              v              v             v
-  Source       Quality        Business       Data         Regulatory
-  Systems      Checks         Logic          Warehouse    Reports
-```
+This section presents **5 complete banking orchestration scenarios** that demonstrate how to build production-grade data pipelines using Apache Airflow and other tools. Each scenario includes the business context, problem, solution architecture, complete DAG code, and business outcomes.
 
 ---
 
-## 5. Banking Examples
+### Scenario 1: Daily End-of-Day (EOD) Banking Pipeline
 
-### Example 1: Daily Reconciliation Pipeline
+> **Business Context:** A bank must process millions of daily transactions, update account balances, generate reports, and prepare regulatory submissions every night.
+
+#### The Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ Manual batch processing (operators run scripts manually)          │
+│   ❌ No dependency tracking (steps fail silently)                       │
+│   ❌ No retry mechanism (failures require manual intervention)         │
+│   ❌ No alerting (issues discovered next morning)                      │
+│   ❌ Processing takes 8+ hours (misses morning deadlines)             │
+│                                                                         │
+│   10:00 PM: Operator starts processing                                 │
+│   2:00 AM:  Step 3 fails silently                                      │
+│   6:00 AM:  Operator discovers failure, restarts from beginning        │
+│   10:00 AM: Reports delayed, regulators unhappy                        │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### The Solution: Automated EOD Pipeline with Airflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 EOD BANKING PIPELINE ARCHITECTURE                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   TRIGGER: Schedule (Daily at 10:00 PM) + Manual                       │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE AIRFLOW DAG                            │  │
+│   │                    "daily_eod_pipeline"                         │  │
+│   │                                                                  │  │
+│   │  ┌────────────┐                                                 │  │
+│   │  │ extract_   │                                                 │  │
+│   │  │ transactions│────┐                                            │  │
+│   │  └────────────┘    │                                            │  │
+│   │                    ▼                                            │  │
+│   │            ┌────────────┐                                       │  │
+│   │            │ validate_  │                                       │  │
+│   │            │ data       │                                       │  │
+│   │            └─────┬──────┘                                       │  │
+│   │                  │                                              │  │
+│   │         ┌────────┴────────┐                                     │  │
+│   │         ▼                 ▼                                     │  │
+│   │  ┌────────────┐   ┌────────────┐                                │  │
+│   │  │ process_   │   │ process_   │                                │  │
+│   │  │ cards      │   │ loans      │                                │  │
+│   │  └─────┬──────┘   └─────┬──────┘                                │  │
+│   │        │                │                                        │  │
+│   │        └────────┬───────┘                                        │  │
+│   │                 ▼                                                │  │
+│   │          ┌────────────┐                                          │  │
+│   │          │ update_    │                                          │  │
+│   │          │ balances   │                                          │  │
+│   │          └─────┬──────┘                                          │  │
+│   │                │                                                 │  │
+│   │       ┌────────┴────────┬────────────┐                          │  │
+│   │       ▼                 ▼            ▼                           │  │
+│   │ ┌──────────┐    ┌──────────┐   ┌──────────┐                     │  │
+│   │ │ generate │    │ reconcile│   │ archive  │                     │  │
+│   │ │ reports  │    │ accounts │   │ data     │                     │  │
+│   │ └────┬─────┘    └────┬─────┘   └────┬─────┘                     │  │
+│   │      │               │              │                           │  │
+│   │      └───────────────┴──────────────┘                           │  │
+│   │                      │                                           │  │
+│   │              ┌───────▼───────┐                                   │  │
+│   │              │ notify_team   │                                   │  │
+│   │              └───────────────┘                                   │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Complete Airflow DAG
 
 ```python
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
+from airflow.operators.bash import BashOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.providers.amazon.aws.sensors.s3 import S3KeySensor
+from airflow.utils.dates import days_ago
+from datetime import timedelta
+import logging
 
-def reconcile_accounts(**context):
-    """Compare internal vs external records"""
+logger = logging.getLogger(__name__)
+
+default_args = {
+    'owner': 'data-engineering',
+    'depends_on_past': True,  # Critical: don't run if previous day failed
+    'start_date': days_ago(1),
+    'email_on_failure': True,
+    'email': ['data-alerts@bank.com', 'ops@bank.com'],
+    'retries': 3,
+    'retry_delay': timedelta(minutes=10),
+    'retry_exponential_backoff': True,
+    'execution_timeout': timedelta(hours=4),
+}
+
+# ============================================================
+# TASK FUNCTIONS
+# ============================================================
+
+def extract_transactions(**context):
+    """Extract daily transactions from core banking system."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    import pandas as pd
+    
+    pg_hook = PostgresHook(postgres_conn_id='core_banking')
+    
+    # Extract today's transactions
+    df = pg_hook.get_pandas_df("""
+        SELECT 
+            txn_id,
+            account_id,
+            txn_type,
+            amount,
+            currency,
+            channel,
+            status,
+            created_at
+        FROM transactions
+        WHERE DATE(created_at) = %s
+          AND status = 'COMPLETED'
+    """, parameters=[context['ds']])
+    
+    # Save to staging area
+    df.to_parquet(f"/tmp/staging/transactions_{context['ds']}.parquet", index=False)
+    
+    logger.info(f"Extracted {len(df)} transactions for {context['ds']}")
+    context['ti'].xcom_push(key='transaction_count', value=len(df))
+    return len(df)
+
+def validate_data(**context):
+    """Validate extracted data quality."""
+    import pandas as pd
+    
+    df = pd.read_parquet(f"/tmp/staging/transactions_{context['ds']}.parquet")
+    
+    # Data quality checks
+    errors = []
+    
+    # Check 1: No empty dataset
+    if len(df) == 0:
+        errors.append("No transactions found for the day")
+    
+    # Check 2: No duplicate transaction IDs
+    if df['txn_id'].duplicated().any():
+        errors.append(f"{df['txn_id'].duplicated().sum()} duplicate transaction IDs")
+    
+    # Check 3: No negative amounts
+    if (df['amount'] < 0).any():
+        errors.append(f"{(df['amount'] < 0).sum()} transactions with negative amounts")
+    
+    # Check 4: All required fields present
+    required_cols = ['txn_id', 'account_id', 'txn_type', 'amount']
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        errors.append(f"Missing columns: {missing_cols}")
+    
+    if errors:
+        raise ValueError(f"Data validation failed: {'; '.join(errors)}")
+    
+    logger.info(f"Data validation passed: {len(df)} records")
+    return True
+
+def process_card_transactions(**context):
+    """Process card transactions separately."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    import pandas as pd
+    
+    pg_hook = PostgresHook(postgres_conn_id='cards_system')
+    
+    df = pg_hook.get_pandas_df("""
+        SELECT 
+            card_txn_id,
+            card_number_masked,
+            merchant_name,
+            amount,
+            currency,
+            authorization_code,
+            created_at
+        FROM card_transactions
+        WHERE DATE(created_at) = %s
+    """, parameters=[context['ds']])
+    
+    df.to_parquet(f"/tmp/staging/card_txns_{context['ds']}.parquet", index=False)
+    logger.info(f"Processed {len(df)} card transactions")
+    return len(df)
+
+def update_account_balances(**context):
+    """Update account balances based on processed transactions."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    
     pg_hook = PostgresHook(postgres_conn_id='warehouse')
     
-    # Get internal balances
-    internal = pg_hook.get_pandas_df("""
-        SELECT account_id, SUM(debit) as total_debit, SUM(credit) as total_credit
-        FROM gl_entries WHERE entry_date = %s
-        GROUP BY account_id
+    # Update balances using MERGE/UPSERT
+    update_query = """
+        INSERT INTO fact_daily_balances (account_id, balance_date, opening_balance, 
+                                        total_credits, total_debits, closing_balance)
+        SELECT 
+            t.account_id,
+            DATE(t.created_at) as balance_date,
+            COALESCE(prev.closing_balance, 0) as opening_balance,
+            SUM(CASE WHEN t.txn_type = 'CREDIT' THEN t.amount ELSE 0 END) as total_credits,
+            SUM(CASE WHEN t.txn_type = 'DEBIT' THEN t.amount ELSE 0 END) as total_debits,
+            COALESCE(prev.closing_balance, 0) + 
+                SUM(CASE WHEN t.txn_type = 'CREDIT' THEN t.amount ELSE -t.amount END) as closing_balance
+        FROM transactions t
+        LEFT JOIN fact_daily_balances prev 
+            ON t.account_id = prev.account_id 
+            AND prev.balance_date = DATE(t.created_at) - INTERVAL '1 day'
+        WHERE DATE(t.created_at) = %s
+        GROUP BY t.account_id, DATE(t.created_at), prev.closing_balance
+        ON CONFLICT (account_id, balance_date) 
+        DO UPDATE SET 
+            total_credits = EXCLUDED.total_credits,
+            total_debits = EXCLUDED.total_debits,
+            closing_balance = EXCLUDED.closing_balance;
+    """
+    
+    pg_hook.run(update_query, parameters=[context['ds']])
+    logger.info("Account balances updated successfully")
+
+def reconcile_accounts(**context):
+    """Reconcile internal vs external records."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    
+    pg_hook = PostgresHook(postgres_conn_id='warehouse')
+    
+    # Check for discrepancies
+    result = pg_hook.get_first("""
+        SELECT COUNT(*) as discrepancies
+        FROM fact_daily_balances db
+        JOIN bank_statements bs 
+            ON db.account_id = bs.account_id 
+            AND db.balance_date = bs.statement_date
+        WHERE ABS(db.closing_balance - bs.balance) > 0.01
+          AND db.balance_date = %s
     """, parameters=[context['ds']])
     
-    # Get external balances (from bank statement)
-    external = pg_hook.get_pandas_df("""
-        SELECT account_id, balance
-        FROM bank_statements WHERE statement_date = %s
+    discrepancies = result[0]
+    if discrepancies > 0:
+        raise ValueError(f"Reconciliation failed: {discrepancies} accounts have discrepancies")
+    
+    logger.info("Reconciliation passed: All accounts balanced")
+
+def generate_reports(**context):
+    """Generate daily regulatory and management reports."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    
+    pg_hook = PostgresHook(postgres_conn_id='warehouse')
+    
+    # Generate daily summary report
+    report = pg_hook.get_pandas_df("""
+        SELECT 
+            balance_date,
+            COUNT(DISTINCT account_id) as total_accounts,
+            SUM(closing_balance) as total_deposits,
+            SUM(total_credits) as total_credits,
+            SUM(total_debits) as total_debits
+        FROM fact_daily_balances
+        WHERE balance_date = %s
+        GROUP BY balance_date
     """, parameters=[context['ds']])
     
-    # Compare
-    merged = internal.merge(external, on='account_id')
-    merged['variance'] = merged['total_credit'] - merged['total_debit'] - merged['balance']
+    report.to_csv(f"/tmp/reports/daily_summary_{context['ds']}.csv", index=False)
+    logger.info(f"Report generated: {report.to_dict()}")
+
+def notify_success(**context):
+    """Send success notification."""
+    from airflow.operators.email import EmailOperator
     
-    # Flag discrepancies
-    discrepancies = merged[abs(merged['variance']) > 0.01]
-    if len(discrepancies) > 0:
-        raise ValueError(f"Reconciliation failed: {len(discrepancies)} discrepancies")
+    txn_count = context['ti'].xcom_pull(task_ids='extract_transactions', key='transaction_count')
+    
+    message = f"""
+    EOD Pipeline Completed Successfully
+    
+    Date: {context['ds']}
+    Transactions Processed: {txn_count}
+    Duration: {context['ti'].execution_date}
+    
+    Reports are available in /tmp/reports/
+    """
+    
+    logger.info(message)
+
+# ============================================================
+# DAG DEFINITION
+# ============================================================
+
+with DAG(
+    'daily_eod_pipeline',
+    default_args=default_args,
+    description='Daily End-of-Day Banking Pipeline',
+    schedule_interval='0 22 * * *',  # 10:00 PM daily
+    catchup=False,
+    max_active_runs=1,  # Only one instance at a time
+    tags=['banking', 'eod', 'production'],
+) as dag:
+
+    # Task 1: Extract transactions
+    extract = PythonOperator(
+        task_id='extract_transactions',
+        python_callable=extract_transactions,
+    )
+
+    # Task 2: Validate data
+    validate = PythonOperator(
+        task_id='validate_data',
+        python_callable=validate_data,
+    )
+
+    # Task 3: Process card transactions (parallel)
+    process_cards = PythonOperator(
+        task_id='process_card_transactions',
+        python_callable=process_card_transactions,
+    )
+
+    # Task 4: Update balances
+    update_balances = PythonOperator(
+        task_id='update_account_balances',
+        python_callable=update_account_balances,
+    )
+
+    # Task 5: Reconcile accounts
+    reconcile = PythonOperator(
+        task_id='reconcile_accounts',
+        python_callable=reconcile_accounts,
+    )
+
+    # Task 6: Generate reports
+    reports = PythonOperator(
+        task_id='generate_reports',
+        python_callable=generate_reports,
+    )
+
+    # Task 7: Archive data
+    archive = BashOperator(
+        task_id='archive_data',
+        bash_command='''
+            aws s3 mv /tmp/staging/transactions_{{ ds }}.parquet \
+                s3://data-warehouse/archive/{{ ds }}/transactions.parquet
+            aws s3 mv /tmp/reports/daily_summary_{{ ds }}.csv \
+                s3://reports/daily/{{ ds }}/summary.csv
+        ''',
+    )
+
+    # Task 8: Notify
+    notify = PythonOperator(
+        task_id='notify_success',
+        python_callable=notify_success,
+    )
+
+    # Define dependencies
+    extract >> validate >> [update_balances, process_cards]
+    [update_balances, process_cards] >> reconcile >> reports >> archive >> notify
 ```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Processing time | 8 hours | 2 hours | 75% faster |
+| Failure rate | 15% | 2% | 87% reduction |
+| Mean time to recovery | 4 hours | 10 minutes | 96% faster |
+| Manual intervention | Daily | Weekly | 85% reduction |
+| Report availability | 10:00 AM | 1:00 AM | 9 hours earlier |
+
+---
+
+### Scenario 2: Real-Time Fraud Detection Pipeline
+
+> **Business Context:** A bank needs to detect fraudulent transactions in real-time and trigger alerts within seconds.
+
+#### The Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ Fraud detection runs in BATCH (next-day analysis)                │
+│   ❌ Average fraud detection time: 48 hours                           │
+│   ❌ Monthly fraud losses: $2M+                                        │
+│   ❌ High false positive rate (40%)                                    │
+│   ❌ Manual investigation (3 days per case)                           │
+│                                                                         │
+│   Transaction → Database → Nightly Batch → Fraud Rules → Alert (Late!) │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### The Solution: Real-Time Streaming Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 REAL-TIME FRAUD DETECTION PIPELINE                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   DATA SOURCES                                                         │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                │
+│   │ Card          │  │ ATM          │  │ Mobile       │                │
+│   │ Transactions  │  │ Transactions │  │ Payments     │                │
+│   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                │
+│          │                  │                  │                        │
+│          └──────────────────┼──────────────────┘                        │
+│                             │                                          │
+│                    Apache Kafka                                        │
+│                    (Event Streaming)                                   │
+│                             │                                          │
+│                             ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE AIRFLOW                                │  │
+│   │                    (Orchestration Layer)                         │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │ DAG: fraud_detection_realtime                             │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐    ┌──────────┐    ┌──────────┐            │ │  │
+│   │  │  │ consume_ │    │ enrich_  │    │ score_   │            │ │  │
+│   │  │  │ kafka    │───▶│ txn_data │───▶│ fraud    │            │ │  │
+│   │  │  │ events   │    │          │    │ risk     │            │ │  │
+│   │  │  └──────────┘    └──────────┘    └────┬─────┘            │ │  │
+│   │  │                                       │                  │ │  │
+│   │  │                    ┌──────────────────┼──────────────┐   │ │  │
+│   │  │                    ▼                  ▼              ▼   │ │  │
+│   │  │              ┌──────────┐       ┌──────────┐   ┌──────┐ │ │  │
+│   │  │              │ block_   │       │ alert_   │   │ log_ │ │ │  │
+│   │  │              │ txn_if   │       │ fraud_   │   │ to_  │ │ │  │
+│   │  │              │ high_risk│       │ ops_team │   │ lake │ │ │  │
+│   │  │              └──────────┘       └──────────┘   └──────┘ │ │  │
+│   │  │                                                          │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                             │                                          │
+│                             ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DOWNSTREAM SYSTEMS                            │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐    ┌──────────┐    ┌──────────┐                  │  │
+│   │  │ Fraud    │    │ Case     │    │ ML Model │                  │  │
+│   │  │ Dashboard│    │ Mgmt     │    │ Retrain  │                  │  │
+│   │  │ (Live)   │    │ System   │    │ Pipeline │                  │  │
+│   │  └──────────┘    └──────────┘    └──────────┘                  │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Complete Airflow DAG for Fraud Detection
+
+```python
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.providers.apache.kafka.operators.produce import ProduceToTopicOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.utils.dates import days_ago
+from datetime import timedelta
+import json
+
+default_args = {
+    'owner': 'fraud-ops',
+    'retries': 2,
+    'retry_delay': timedelta(seconds=30),
+    'execution_timeout': timedelta(minutes=5),
+}
+
+def consume_kafka_events(**context):
+    """Consume transaction events from Kafka."""
+    from kafka import KafkaConsumer
+    import json
+    
+    consumer = KafkaConsumer(
+        'card-transactions',
+        bootstrap_servers=['kafka:9092'],
+        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+        auto_offset_reset='latest',
+        consumer_timeout_ms=10000,  # 10 seconds
+    )
+    
+    transactions = []
+    for message in consumer:
+        transactions.append(message.value)
+        if len(transactions) >= 1000:  # Process in batches
+            break
+    
+    consumer.close()
+    context['ti'].xcom_push(key='transactions', value=transactions)
+    return len(transactions)
+
+def enrich_transaction_data(**context):
+    """Enrich transactions with customer and historical data."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    import pandas as pd
+    
+    transactions = context['ti'].xcom_pull(task_ids='consume_kafka_events', key='transactions')
+    df = pd.DataFrame(transactions)
+    
+    pg_hook = PostgresHook(postgres_conn_id='warehouse')
+    
+    # Get customer profile
+    customer_ids = df['customer_id'].unique().tolist()
+    customers = pg_hook.get_pandas_df(
+        "SELECT * FROM dim_customers WHERE customer_id IN %s",
+        parameters=[tuple(customer_ids)]
+    )
+    
+    # Get historical transaction patterns
+    history = pg_hook.get_pandas_df("""
+        SELECT 
+            customer_id,
+            AVG(amount) as avg_amount,
+            STDDEV(amount) as std_amount,
+            COUNT(*) as txn_count_30d
+        FROM fact_transactions
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY customer_id
+    """)
+    
+    # Merge
+    df = df.merge(customers, on='customer_id', how='left')
+    df = df.merge(history, on='customer_id', how='left')
+    
+    context['ti'].xcom_push(key='enriched_df', value=df.to_dict())
+    return len(df)
+
+def score_fraud_risk(**context):
+    """Score transactions for fraud risk using ML model."""
+    import pandas as pd
+    import numpy as np
+    from sklearn.ensemble import RandomForestClassifier
+    import joblib
+    
+    enriched_data = context['ti'].xcom_pull(task_ids='enrich_transaction_data', key='enriched_df')
+    df = pd.DataFrame(enriched_data)
+    
+    # Load pre-trained model
+    model = joblib.load('/models/fraud_detector.pkl')
+    
+    # Feature engineering
+    features = ['amount', 'avg_amount', 'std_amount', 'txn_count_30d']
+    X = df[features].fillna(0)
+    
+    # Predict fraud probability
+    df['fraud_probability'] = model.predict_proba(X)[:, 1]
+    df['risk_level'] = pd.cut(
+        df['fraud_probability'],
+        bins=[0, 0.3, 0.7, 1.0],
+        labels=['LOW', 'MEDIUM', 'HIGH']
+    )
+    
+    # Flag high-risk transactions
+    high_risk = df[df['risk_level'] == 'HIGH']
+    
+    context['ti'].xcom_push(key='high_risk_txns', value=high_risk.to_dict())
+    return len(high_risk)
+
+def block_and_alert(**context):
+    """Block high-risk transactions and send alerts."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    from airflow.models import Variable
+    import requests
+    
+    high_risk = context['ti'].xcom_pull(task_ids='score_fraud_risk', key='high_risk_txns')
+    df = pd.DataFrame(high_risk)
+    
+    pg_hook = PostgresHook(postgres_conn_id='cards_system')
+    
+    for _, txn in df.iterrows():
+        # Block transaction
+        pg_hook.run("""
+            UPDATE card_transactions 
+            SET status = 'BLOCKED', block_reason = 'FRAUD_SUSPECTED'
+            WHERE txn_id = %s
+        """, parameters=[txn['txn_id']])
+        
+        # Send alert to fraud ops
+        slack_webhook = Variable.get('slack_fraud_webhook')
+        requests.post(slack_webhook, json={
+            'text': f"🚨 FRAUD ALERT: Transaction {txn['txn_id']} blocked. "
+                    f"Amount: ${txn['amount']}, Customer: {txn['customer_id']}, "
+                    f"Risk Score: {txn['fraud_probability']:.2f}"
+        })
+    
+    return len(df)
+
+with DAG(
+    'fraud_detection_realtime',
+    default_args=default_args,
+    description='Real-time fraud detection pipeline',
+    schedule_interval='*/5 * * * *',  # Every 5 minutes
+    catchup=False,
+    max_active_runs=1,
+    tags=['fraud', 'realtime', 'critical'],
+) as dag:
+
+    consume = PythonOperator(
+        task_id='consume_kafka_events',
+        python_callable=consume_kafka_events,
+    )
+
+    enrich = PythonOperator(
+        task_id='enrich_transaction_data',
+        python_callable=enrich_transaction_data,
+    )
+
+    score = PythonOperator(
+        task_id='score_fraud_risk',
+        python_callable=score_fraud_risk,
+    )
+
+    block_alert = PythonOperator(
+        task_id='block_and_alert',
+        python_callable=block_and_alert,
+    )
+
+    consume >> enrich >> score >> block_alert
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Fraud detection time | 48 hours | 5 minutes | 99.9% faster |
+| Monthly fraud losses | $2M | $200K | 90% reduction |
+| False positive rate | 40% | 10% | 75% reduction |
+| Investigation time | 3 days | 2 hours | 97% faster |
+| Customer alerts | None | Real-time | New capability |
+
+---
+
+### Scenario 3: Regulatory Reporting Automation
+
+> **Business Context:** A bank must submit 50+ regulatory reports to the central bank (SBV/Fed) with strict deadlines.
+
+#### The Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ 50+ reports, each with different data requirements               │
+│   ❌ Manual data extraction from 10+ systems                           │
+│   ❌ Reports prepared in Excel (error-prone)                          │
+│   ❌ Missed deadlines (penalties: $100K+ per incident)                │
+│   ❌ Audit trail incomplete (compliance risk)                         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### The Solution: Automated Regulatory Reporting Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              AUTOMATED REGULATORY REPORTING PIPELINE                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                 APACHE AIRFLOW DAGS                              │  │
+│   │                 (One DAG per report type)                        │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │ DAG: daily_basel_iii_report                               │ │  │
+│   │  │ Schedule: Business days at 6:00 AM                        │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐    ┌──────────┐    ┌──────────┐            │ │  │
+│   │  │  │ extract_ │    │ calculate│    │ validate_│            │ │  │
+│   │  │  │ capital  │───▶│ ratios   │───▶│ report   │            │ │  │
+│   │  │  │ data     │    │          │    │          │            │ │  │
+│   │  │  └──────────┘    └──────────┘    └────┬─────┘            │ │  │
+│   │  │                                       │                  │ │  │
+│   │  │                    ┌──────────────────┼──────────────┐   │ │  │
+│   │  │                    ▼                  ▼              ▼   │ │  │
+│   │  │              ┌──────────┐       ┌──────────┐   ┌──────┐ │ │  │
+│   │  │              │ generate │       │ get      │   │submit│ │ │  │
+│   │  │              │ PDF      │       │ approval │   │to_sbv│ │ │  │
+│   │  │              │ report   │       │          │   │      │ │ │  │
+│   │  │              └──────────┘       └──────────┘   └──────┘ │ │  │
+│   │  │                                                          │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │ DAG: monthly_aml_report                                    │ │  │
+│   │  │ DAG: quarterly_financial_statements                        │ │  │
+│   │  │ DAG: annual_audited_reports                                │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Complete Airflow DAG for Basel III Report
+
+```python
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.utils.dates import days_ago
+from datetime import timedelta
+
+default_args = {
+    'owner': 'regulatory-team',
+    'depends_on_past': True,
+    'start_date': days_ago(1),
+    'email_on_failure': True,
+    'email': ['regulatory@bank.com', 'compliance@bank.com'],
+    'retries': 2,
+    'retry_delay': timedelta(minutes=15),
+}
+
+def extract_capital_data(**context):
+    """Extract capital and risk-weighted assets data."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    import pandas as pd
+    
+    pg_hook = PostgresHook(postgres_conn_id='warehouse')
+    
+    # Extract Tier 1 capital
+    tier1 = pg_hook.get_pandas_df("""
+        SELECT 
+            SUM(common_equity) as cet1_capital,
+            SUM(additional_tier1) as at1_capital,
+            SUM(cet1_capital + additional_tier1) as tier1_capital
+        FROM fact_capital_positions
+        WHERE report_date = %s
+    """, parameters=[context['ds']])
+    
+    # Extract Tier 2 capital
+    tier2 = pg_hook.get_pandas_df("""
+        SELECT SUM(eligible_amount) as tier2_capital
+        FROM fact_subordinated_debt
+        WHERE report_date = %s
+    """, parameters=[context['ds']])
+    
+    # Extract risk-weighted assets
+    rwa = pg_hook.get_pandas_df("""
+        SELECT 
+            asset_class,
+            SUM(rwa_amount) as rwa
+        FROM fact_risk_weighted_assets
+        WHERE report_date = %s
+        GROUP BY asset_class
+    """, parameters=[context['ds']])
+    
+    # Combine
+    capital = pd.concat([tier1, tier2], axis=1)
+    capital['total_capital'] = capital['tier1_capital'] + capital['tier2_capital']
+    capital['total_rwa'] = rwa['rwa'].sum()
+    
+    capital.to_parquet(f"/tmp/regulatory/basel_iii_{context['ds']}.parquet")
+    return capital.to_dict()
+
+def calculate_ratios(**context):
+    """Calculate capital adequacy ratios."""
+    import pandas as pd
+    
+    capital = pd.read_parquet(f"/tmp/regulatory/basel_iii_{context['ds']}.parquet")
+    
+    # Calculate ratios
+    ratios = {
+        'cet1_ratio': (capital['cet1_capital'].iloc[0] / capital['total_rwa'].iloc[0]) * 100,
+        'tier1_ratio': (capital['tier1_capital'].iloc[0] / capital['total_rwa'].iloc[0]) * 100,
+        'total_ratio': (capital['total_capital'].iloc[0] / capital['total_rwa'].iloc[0]) * 100,
+    }
+    
+    # Check compliance
+    ratios['cet1_compliant'] = ratios['cet1_ratio'] >= 4.5
+    ratios['tier1_compliant'] = ratios['tier1_ratio'] >= 6.0
+    ratios['total_compliant'] = ratios['total_ratio'] >= 8.0
+    ratios['buffer_compliant'] = ratios['total_ratio'] >= 10.5  # +2.5% buffer
+    
+    if not ratios['buffer_compliant']:
+        raise ValueError(f"Capital adequacy below required levels: {ratios}")
+    
+    context['ti'].xcom_push(key='ratios', value=ratios)
+    return ratios
+
+def generate_pdf_report(**context):
+    """Generate PDF report for SBV submission."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    import pandas as pd
+    
+    ratios = context['ti'].xcom_pull(task_ids='calculate_ratios', key='ratios')
+    
+    # Generate PDF
+    filename = f"/tmp/reports/basel_iii_{context['ds']}.pdf"
+    c = canvas.Canvas(filename, pagesize=A4)
+    
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(100, 800, "Basel III Capital Adequacy Report")
+    c.drawString(100, 780, f"Report Date: {context['ds']}")
+    
+    c.setFont("Helvetica", 12)
+    y = 740
+    for key, value in ratios.items():
+        c.drawString(100, y, f"{key}: {value}")
+        y -= 20
+    
+    c.save()
+    return filename
+
+def submit_to_sbv(**context):
+    """Submit report to State Bank of Vietnam."""
+    import requests
+    from airflow.models import Variable
+    
+    report_path = context['ti'].xcom_pull(task_ids='generate_pdf_report')
+    
+    sbv_api_url = Variable.get('sbv_reporting_api_url')
+    sbv_api_key = Variable.get('sbv_reporting_api_key')
+    
+    with open(report_path, 'rb') as f:
+        response = requests.post(
+            sbv_api_url,
+            headers={'Authorization': f'Bearer {sbv_api_key}'},
+            files={'report': f},
+            data={
+                'report_type': 'BASEL_III',
+                'report_date': context['ds'],
+                'bank_code': 'BANK001'
+            }
+        )
+    
+    if response.status_code != 200:
+        raise ValueError(f"SBV submission failed: {response.text}")
+    
+    return response.json()
+
+with DAG(
+    'daily_basel_iii_report',
+    default_args=default_args,
+    description='Daily Basel III Capital Adequacy Report',
+    schedule_interval='0 6 * * 1-5',  # Business days at 6 AM
+    catchup=False,
+    tags=['regulatory', 'basel', 'sbv'],
+) as dag:
+
+    extract = PythonOperator(
+        task_id='extract_capital_data',
+        python_callable=extract_capital_data,
+    )
+
+    calculate = PythonOperator(
+        task_id='calculate_ratios',
+        python_callable=calculate_ratios,
+    )
+
+    generate_pdf = PythonOperator(
+        task_id='generate_pdf_report',
+        python_callable=generate_pdf_report,
+    )
+
+    submit = PythonOperator(
+        task_id='submit_to_sbv',
+        python_callable=submit_to_sbv,
+    )
+
+    extract >> calculate >> generate_pdf >> submit
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Report preparation time | 5 days | 2 hours | 99% faster |
+| Data accuracy | 95% | 99.9% | 99.9% accurate |
+| Missed deadlines | 3-4 per year | 0 | 100% on-time |
+| Audit findings | 20+ per audit | < 5 | 75% reduction |
+| Regulatory penalties | $500K/year | $0 | Eliminated |
+
+---
+
+### Scenario 4: Customer Onboarding Pipeline
+
+> **Business Context:** A bank needs to onboard new customers within 24 hours while meeting KYC/AML requirements.
+
+#### The Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ Customer onboarding takes 5-7 days                               │
+│   ❌ Manual KYC verification (human review required)                  │
+│   ❌ High drop-off rate (40% abandon application)                     │
+│   ❌ Compliance errors (incorrectly approved risky customers)         │
+│   ❌ Customer complaints about slow process                           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### The Solution: Automated Onboarding Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 CUSTOMER ONBOARDING PIPELINE                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   TRIGGER: New Customer Application (API Event)                        │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                 APACHE AIRFLOW DAG                               │  │
+│   │                 "customer_onboarding"                            │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐    ┌──────────┐    ┌──────────┐                  │  │
+│   │  │ validate │    │ run_kyc  │    │ check_   │                  │  │
+│   │  │ application│──▶│ aml     │──▶│ credit   │                  │  │
+│   │  └──────────┘    └──────────┘    └────┬─────┘                  │  │
+│   │                                       │                        │  │
+│   │                    ┌──────────────────┼──────────────┐         │  │
+│   │                    ▼                  ▼              ▼         │  │
+│   │              ┌──────────┐       ┌──────────┐   ┌──────┐       │  │
+│   │              │ APPROVE  │       │ MANUAL   │   │REJECT│       │  │
+│   │              │ (auto)   │       │ REVIEW   │   │      │       │  │
+│   │              └────┬─────┘       └────┬─────┘   └──────┘       │  │
+│   │                   │                  │                        │  │
+│   │                   └────────┬─────────┘                        │  │
+│   │                            ▼                                   │  │
+│   │                     ┌──────────┐                               │  │
+│   │                     │ create_  │                               │  │
+│   │                     │ account  │                               │  │
+│   │                     └────┬─────┘                               │  │
+│   │                          │                                     │  │
+│   │              ┌───────────┼───────────┐                         │  │
+│   │              ▼           ▼           ▼                          │  │
+│   │        ┌──────────┐ ┌──────────┐ ┌──────────┐                 │  │
+│   │        │ send_    │ │ setup_   │ │ notify_  │                 │  │
+│   │        │ welcome  │ │ products │ │ rm_team  │                 │  │
+│   │        └──────────┘ └──────────┘ └──────────┘                 │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Complete Airflow DAG for Customer Onboarding
+
+```python
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.email import EmailOperator
+from airflow.utils.dates import days_ago
+from datetime import timedelta
+
+default_args = {
+    'owner': 'customer-onboarding',
+    'retries': 2,
+    'retry_delay': timedelta(minutes=5),
+    'email_on_failure': True,
+    'email': ['onboarding@bank.com'],
+}
+
+def validate_application(**context):
+    """Validate customer application data."""
+    import pandas as pd
+    
+    application = context['ti'].xcom_pull(task_ids='receive_application', key='application')
+    
+    errors = []
+    
+    # Required fields
+    required = ['customer_name', 'email', 'phone', 'id_type', 'id_number']
+    for field in required:
+        if not application.get(field):
+            errors.append(f"Missing required field: {field}")
+    
+    # Email validation
+    if application.get('email') and '@' not in application['email']:
+        errors.append("Invalid email format")
+    
+    if errors:
+        raise ValueError(f"Application validation failed: {'; '.join(errors)}")
+    
+    return True
+
+def run_kyc_aml_check(**context):
+    """Run KYC and AML checks."""
+    import requests
+    from airflow.models import Variable
+    
+    application = context['ti'].xcom_pull(task_ids='receive_application', key='application')
+    
+    kyc_api_url = Variable.get('kyc_api_url')
+    kyc_api_key = Variable.get('kyc_api_key')
+    
+    # KYC check
+    kyc_response = requests.post(
+        f"{kyc_api_url}/kyc/verify",
+        json={
+            'name': application['customer_name'],
+            'id_type': application['id_type'],
+            'id_number': application['id_number'],
+        },
+        headers={'Authorization': f'Bearer {kyc_api_key}'}
+    )
+    
+    # AML check
+    aml_response = requests.post(
+        f"{kyc_api_url}/aml/screen",
+        json={
+            'name': application['customer_name'],
+            'country': application.get('country', 'VN'),
+        },
+        headers={'Authorization': f'Bearer {kyc_api_key}'}
+    )
+    
+    results = {
+        'kyc_passed': kyc_response.json().get('verified', False),
+        'aml_passed': aml_response.json().get('clear', False),
+        'risk_score': aml_response.json().get('risk_score', 0),
+    }
+    
+    context['ti'].xcom_push(key='kyc_aml_results', value=results)
+    return results
+
+def check_creditworthiness(**context):
+    """Check customer credit score and risk profile."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    import pandas as pd
+    
+    application = context['ti'].xcom_pull(task_ids='receive_application', key='application')
+    kyc_results = context['ti'].xcom_pull(task_ids='run_kyc_aml_check', key='kyc_aml_results')
+    
+    # Decision logic
+    if not kyc_results['kyc_passed']:
+        return 'reject'
+    
+    if not kyc_results['aml_passed']:
+        return 'reject'
+    
+    if kyc_results['risk_score'] > 0.7:
+        return 'manual_review'
+    
+    return 'approve'
+
+def decide_next_step(**context):
+    """Branch based on decision."""
+    decision = context['ti'].xcom_pull(task_ids='check_creditworthiness')
+    
+    if decision == 'approve':
+        return 'create_account'
+    elif decision == 'manual_review':
+        return 'send_to_manual_review'
+    else:
+        return 'send_rejection_email'
+
+def create_account(**context):
+    """Create customer account in core banking system."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    import uuid
+    
+    application = context['ti'].xcom_pull(task_ids='receive_application', key='application')
+    
+    pg_hook = PostgresHook(postgres_conn_id='core_banking')
+    
+    customer_id = f"CUST-{uuid.uuid4().hex[:8].upper()}"
+    account_id = f"ACC-{uuid.uuid4().hex[:8].upper()}"
+    
+    pg_hook.run("""
+        INSERT INTO customers (customer_id, name, email, phone, kyc_status, created_at)
+        VALUES (%s, %s, %s, %s, 'VERIFIED', NOW())
+    """, parameters=[customer_id, application['customer_name'], 
+                      application['email'], application['phone']])
+    
+    pg_hook.run("""
+        INSERT INTO accounts (account_id, customer_id, account_type, balance, created_at)
+        VALUES (%s, %s, 'SAVINGS', 0, NOW())
+    """, parameters=[account_id, customer_id])
+    
+    context['ti'].xcom_push(key='customer_id', value=customer_id)
+    context['ti'].xcom_push(key='account_id', value=account_id)
+    
+    return {'customer_id': customer_id, 'account_id': account_id}
+
+with DAG(
+    'customer_onboarding',
+    default_args=default_args,
+    description='Customer onboarding pipeline',
+    schedule_interval=None,  # Triggered by API event
+    catchup=False,
+    tags=['customer', 'onboarding', 'kyc'],
+) as dag:
+
+    validate = PythonOperator(
+        task_id='validate_application',
+        python_callable=validate_application,
+    )
+
+    kyc_aml = PythonOperator(
+        task_id='run_kyc_aml_check',
+        python_callable=run_kyc_aml_check,
+    )
+
+    credit = PythonOperator(
+        task_id='check_creditworthiness',
+        python_callable=check_creditworthiness,
+    )
+
+    branch = BranchPythonOperator(
+        task_id='decide_next_step',
+        python_callable=decide_next_step,
+    )
+
+    create = PythonOperator(
+        task_id='create_account',
+        python_callable=create_account,
+    )
+
+    manual_review = PythonOperator(
+        task_id='send_to_manual_review',
+        python_callable=lambda: None,  # Placeholder
+    )
+
+    reject = EmailOperator(
+        task_id='send_rejection_email',
+        to=['{{ ti.xcom_pull(task_ids="receive_application", key="application")["email"] }}'],
+        subject='Application Update',
+        html_content='Your application requires additional review.',
+    )
+
+    validate >> kyc_aml >> credit >> branch
+    branch >> [create, manual_review, reject]
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Onboarding time | 5-7 days | 4 hours | 97% faster |
+| Application drop-off | 40% | 10% | 75% reduction |
+| KYC accuracy | 90% | 99% | 99% accurate |
+| Customer satisfaction | 60% | 90% | 50% increase |
+| Compliance errors | 15% | 1% | 93% reduction |
+
+---
+
+### Scenario 5: ML Model Retraining Pipeline
+
+> **Business Context:** A bank needs to retrain fraud detection models weekly with new data.
+
+#### The Solution: Automated ML Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 ML MODEL RETRAINING PIPELINE                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   TRIGGER: Weekly Schedule (Sunday 2:00 AM)                            │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                 APACHE AIRFLOW DAG                               │  │
+│   │                 "weekly_model_retrain"                           │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐    ┌──────────┐    ┌──────────┐                  │  │
+│   │  │ extract_ │    │ feature_ │    │ train_   │                  │  │
+│   │  │ training │──▶│ engineer │──▶│ model    │                  │  │
+│   │  │ data     │    │          │    │          │                  │  │
+│   │  └──────────┘    └──────────┘    └────┬─────┘                  │  │
+│   │                                       │                        │  │
+│   │                    ┌──────────────────┼──────────────┐         │  │
+│   │                    ▼                  ▼              ▼         │  │
+│   │              ┌──────────┐       ┌──────────┐   ┌──────┐       │  │
+│   │              │ evaluate │       │ compare  │   │deploy│       │  │
+│   │              │ model    │       │ with     │   │ to   │       │  │
+│   │              │ metrics  │       │ prod     │   │prod  │       │  │
+│   │              └────┬─────┘       └────┬─────┘   └──────┘       │  │
+│   │                   │                  │                        │  │
+│   │                   └────────┬─────────┘                        │  │
+│   │                            ▼                                   │  │
+│   │                     ┌──────────┐                               │  │
+│   │                     │ notify_  │                               │  │
+│   │                     │ ml_team  │                               │  │
+│   │                     └──────────┘                               │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Complete Airflow DAG for ML Retraining
+
+```python
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.providers.amazon.aws.operators.s3 import S3CopyObjectOperator
+from airflow.utils.dates import days_ago
+from datetime import timedelta
+import mlflow
+
+default_args = {
+    'owner': 'ml-team',
+    'retries': 1,
+    'retry_delay': timedelta(minutes=30),
+    'email_on_failure': True,
+    'email': ['ml-alerts@bank.com'],
+}
+
+def extract_training_data(**context):
+    """Extract training data from data lake."""
+    from airflow.hooks.postgres_hook import PostgresHook
+    import pandas as pd
+    
+    pg_hook = PostgresHook(postgres_conn_id='warehouse')
+    
+    # Extract last 90 days of transaction data
+    df = pg_hook.get_pandas_df("""
+        SELECT 
+            txn_id,
+            amount,
+            customer_age,
+            txn_hour,
+            merchant_category,
+            is_fraud
+        FROM fact_fraud_training_data
+        WHERE created_at >= NOW() - INTERVAL '90 days'
+    """)
+    
+    df.to_parquet(f"/tmp/ml/training_data_{context['ds']}.parquet")
+    return len(df)
+
+def feature_engineering(**context):
+    """Create features for model training."""
+    import pandas as pd
+    import numpy as np
+    
+    df = pd.read_parquet(f"/tmp/ml/training_data_{context['ds']}.parquet")
+    
+    # Feature engineering
+    df['amount_log'] = np.log1p(df['amount'])
+    df['hour_sin'] = np.sin(2 * np.pi * df['txn_hour'] / 24)
+    df['hour_cos'] = np.cos(2 * np.pi * df['txn_hour'] / 24)
+    
+    # Encode categorical variables
+    df = pd.get_dummies(df, columns=['merchant_category'])
+    
+    df.to_parquet(f"/tmp/ml/features_{context['ds']}.parquet")
+    return df.shape[1]
+
+def train_model(**context):
+    """Train fraud detection model."""
+    import pandas as pd
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import train_test_split
+    import mlflow
+    import joblib
+    
+    df = pd.read_parquet(f"/tmp/ml/features_{context['ds']}.parquet")
+    
+    # Split data
+    X = df.drop('is_fraud', axis=1)
+    y = df['is_fraud']
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+    
+    # Train model
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    
+    # Log with MLflow
+    mlflow.set_experiment('fraud_detection')
+    with mlflow.start_run():
+        mlflow.log_param('n_estimators', 100)
+        mlflow.log_metric('accuracy', model.score(X_test, y_test))
+        mlflow.sklearn.log_model(model, 'model')
+    
+    # Save model
+    joblib.dump(model, f"/tmp/ml/model_{context['ds']}.pkl")
+    return model.score(X_test, y_test)
+
+def evaluate_model(**context):
+    """Evaluate model performance."""
+    import pandas as pd
+    import joblib
+    from sklearn.metrics import precision_score, recall_score, f1_score
+    
+    df = pd.read_parquet(f"/tmp/ml/features_{context['ds']}.parquet")
+    model = joblib.load(f"/tmp/ml/model_{context['ds']}.pkl")
+    
+    X = df.drop('is_fraud', axis=1)
+    y = df['is_fraud']
+    
+    y_pred = model.predict(X)
+    
+    metrics = {
+        'precision': precision_score(y, y_pred),
+        'recall': recall_score(y, y_pred),
+        'f1': f1_score(y, y_pred),
+    }
+    
+    # Check if model meets threshold
+    if metrics['f1'] < 0.7:
+        raise ValueError(f"Model performance below threshold: {metrics}")
+    
+    context['ti'].xcom_push(key='model_metrics', value=metrics)
+    return metrics
+
+def deploy_model(**context):
+    """Deploy model to production."""
+    import shutil
+    import os
+    
+    # Copy model to production location
+    source = f"/tmp/ml/model_{context['ds']}.pkl"
+    destination = "/models/production/fraud_detector.pkl"
+    
+    shutil.copy(source, destination)
+    
+    # Update model metadata
+    from datetime import datetime
+    metadata = {
+        'model_version': context['ds'],
+        'deployed_at': datetime.now().isoformat(),
+        'metrics': context['ti'].xcom_pull(task_ids='evaluate_model', key='model_metrics'),
+    }
+    
+    import json
+    with open('/models/production/model_metadata.json', 'w') as f:
+        json.dump(metadata, f)
+    
+    return metadata
+
+with DAG(
+    'weekly_model_retrain',
+    default_args=default_args,
+    description='Weekly ML model retraining pipeline',
+    schedule_interval='0 2 * * 0',  # Sunday at 2 AM
+    catchup=False,
+    tags=['ml', 'retrain', 'fraud'],
+) as dag:
+
+    extract = PythonOperator(
+        task_id='extract_training_data',
+        python_callable=extract_training_data,
+    )
+
+    features = PythonOperator(
+        task_id='feature_engineering',
+        python_callable=feature_engineering,
+    )
+
+    train = PythonOperator(
+        task_id='train_model',
+        python_callable=train_model,
+    )
+
+    evaluate = PythonOperator(
+        task_id='evaluate_model',
+        python_callable=evaluate_model,
+    )
+
+    deploy = PythonOperator(
+        task_id='deploy_model',
+        python_callable=deploy_model,
+    )
+
+    extract >> features >> train >> evaluate >> deploy
+```
+
+---
+
+### Scenario Comparison Matrix
+
+| Aspect | EOD Pipeline | Fraud Detection | Regulatory | Onboarding | ML Retraining |
+|--------|--------------|-----------------|------------|------------|---------------|
+| **Schedule** | Daily 10 PM | Every 5 min | Business days | Event-driven | Weekly |
+| **Latency** | 2 hours | 5 minutes | 2 hours | 4 hours | 3 hours |
+| **Complexity** | Medium | High | Medium | High | High |
+| **Criticality** | High | Critical | Critical | High | Medium |
+| **Key Tools** | Airflow, Spark | Kafka, Flink | Airflow, dbt | Airflow, APIs | MLflow, Spark |
+| **Success Metric** | 99% on-time | 99.9% accuracy | 100% compliance | < 4 hours | F1 > 0.7 |
 
 ---
 

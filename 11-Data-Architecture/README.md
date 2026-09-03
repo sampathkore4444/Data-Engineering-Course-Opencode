@@ -1051,50 +1051,655 @@ Source DB -> CDC -> Kafka -> Multiple Targets
 
 ## 5. Real-World Scenarios
 
-### Scenario 1: Enterprise Data Lakehouse
+### Overview
+
+This section presents **4 complete banking scenarios** that demonstrate how data architecture patterns solve real business problems. Each scenario includes the problem, solution architecture, data flow, tools used, and business outcomes.
+
+---
+
+### Scenario 1: Retail Banking Data Platform
+
+> **Business Context:** A large retail bank with 10M+ customers needs a unified data platform for analytics, reporting, and customer insights.
+
+#### The Problem
 
 ```
-Banking Data Architecture:
-
-Core Banking  Cards  Loans  Wealth
-   |            |      |      |
-   +-----+------+------|------+
-         |
-    Kafka (CDC)
-         |
-    +----v----+
-    |  S3     |
-    |  Raw    |
-    +----+----+
-         |
-    Spark Processing
-         |
-    +----v----+
-    |  S3     |
-    | Curated |
-    +----+----+
-         |
-    Redshift / Snowflake
-         |
-    BI Tools | ML | Regulatory Reports
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ Data silos across 8 different systems                             │
+│   ❌ No single view of customer                                         │
+│   ❌ Reports take 2-3 days to generate                                  │
+│   ❌ Manual data reconciliation (errors frequent)                      │
+│   ❌ Cannot run real-time analytics                                     │
+│                                                                         │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                  │
+│   │ Core     │ │ Cards    │ │ Loans    │ │ Wealth   │                  │
+│   │ Banking  │ │ System   │ │ System   │ │ Mgmt     │                  │
+│   │ (Oracle) │ │ (Mainfrm)│ │ (SQL Srv)│ │ (API)    │                  │
+│   └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘                  │
+│        │             │            │             │                        │
+│        ▼             ▼            ▼             ▼                        │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                  │
+│   │ Excel    │ │ Crystal  │ │ Power BI │ │ Custom   │                  │
+│   │ Reports  │ │ Reports  │ │ Dashb.  │ │ Apps     │                  │
+│   └──────────┘ └──────────┘ └──────────┘ └──────────┘                  │
+│                                                                         │
+│   Result: Inconsistent numbers, slow reporting, poor customer service   │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Scenario 2: Multi-Cloud Data Platform
+#### The Solution: Modern Data Lakehouse
 
 ```
-AWS             GCP             Azure
-+------+       +------+       +------+
-|S3    |       |GCS   |       |ADLS  |
-|Redshift|     |BigQ  |       |Synapse|
-+---+--+       +---+--+       +---+--+
-    |              |              |
-    +-------+------+------+------+
-            |
-    +-------v--------+
-    | Data Mesh      |
-    | (Domain Teams) |
-    +----------------+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    TARGET STATE (After)                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   SOURCE SYSTEMS                                                       │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+│   │ Core     │ │ Cards    │ │ Loans    │ │ Digital  │ │ External │   │
+│   │ Banking  │ │ Payments │ │ System   │ │ Channels │ │ (Market) │   │
+│   │ (Oracle) │ │ (Visa)   │ │ (Flex)   │ │ (Mobile) │ │ (APIs)   │   │
+│   └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘   │
+│        │             │            │             │             │         │
+│        └─────────────┴────────────┴─────────────┴─────────────┘         │
+│                              │                                         │
+│                         CDC (Debezium)                                 │
+│                              │                                         │
+│                              ▼                                         │
+│                    ┌──────────────────┐                                │
+│                    │   Apache Kafka   │                                │
+│                    │   (Event Hub)    │                                │
+│                    └────────┬─────────┘                                │
+│                             │                                          │
+│            ┌────────────────┼────────────────┐                         │
+│            ▼                ▼                ▼                         │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                │
+│   │ BRONZE LAYER │  │ SILVER LAYER │  │ GOLD LAYER   │                │
+│   │              │  │              │  │              │                │
+│   │ Raw data     │  │ Cleansed     │  │ Business     │                │
+│   │ Schema-on-   │  │ Deduplicated │  │ ready        │                │
+│   │ read         │  │ Validated    │  │ Aggregated   │                │
+│   │              │  │ Conformed    │  │ Star Schema  │                │
+│   │ /bronze/     │  │ /silver/     │  │ /gold/       │                │
+│   └──────────────┘  └──────────────┘  └──────────────┘                │
+│            │                │                │                         │
+│            └────────────────┴────────────────┘                         │
+│                              │                                         │
+│                    ┌─────────▼─────────┐                               │
+│                    │   Databricks /    │                               │
+│                    │   Snowflake       │                               │
+│                    └─────────┬─────────┘                               │
+│                              │                                         │
+│         ┌────────────────────┼────────────────────┐                    │
+│         ▼                    ▼                    ▼                    │
+│   ┌──────────┐        ┌──────────┐        ┌──────────┐               │
+│   │ BI       │        │ ML       │        │ Self-    │               │
+│   │ Tools    │        │ Platform │        │ Service  │               │
+│   │(Tableau) │        │(MLflow)  │        │ Portal   │               │
+│   └──────────┘        └──────────┘        └──────────┘               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+#### Data Flow: End-to-End Customer Onboarding
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 CUSTOMER ONBOARDING DATA FLOW                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  1. NEW CUSTOMER APPLIES (Mobile App)                                   │
+│     ┌──────────────────────────────────────────┐                       │
+│     │  Customer fills KYC form online          │                       │
+│     │  → App sends event to Kafka              │                       │
+│     └────────────────────┬─────────────────────┘                       │
+│                          ▼                                             │
+│  2. KAFKA EVENT PROCESSING                                             │
+│     ┌──────────────────────────────────────────┐                       │
+│     │  Topic: customer-onboarding              │                       │
+│     │  Schema: {customer_id, name, email,      │                       │
+│     │           phone, id_type, id_number,     │                       │
+│     │           timestamp}                     │                       │
+│     └────────────────────┬─────────────────────┘                       │
+│                          ▼                                             │
+│  3. BRONZE LAYER (Raw Storage)                                         │
+│     ┌──────────────────────────────────────────┐                       │
+│     │  /bronze/customers/2024/01/15/           │                       │
+│     │  Format: Parquet (append-only)           │                       │
+│     │  Retention: Unlimited                    │                       │
+│     └────────────────────┬─────────────────────┘                       │
+│                          ▼                                             │
+│  4. SILVER LAYER (Cleansed)                                            │
+│     ┌──────────────────────────────────────────┐                       │
+│     │  Spark job runs every 15 minutes:        │                       │
+│     │  • Deduplicate by customer_id            │                       │
+│     │  • Validate email format                 │                       │
+│     │  • Mask PII fields (name, phone, id)     │                       │
+│     │  • Add source metadata                   │                       │
+│     │  • Flag incomplete KYC                   │                       │
+│     └────────────────────┬─────────────────────┘                       │
+│                          ▼                                             │
+│  5. GOLD LAYER (Business-Ready)                                        │
+│     ┌──────────────────────────────────────────┐                       │
+│     │  Customer Master Table (Dimension):      │                       │
+│     │  • customer_key (surrogate)              │                       │
+│     │  • customer_id (business key)            │                       │
+│     │  • name, email, phone (masked)           │                       │
+│     │  • kyc_status, onboarding_date          │                       │
+│     │  • segment (retail/premium/vip)          │                       │
+│     └────────────────────┬─────────────────────┘                       │
+│                          ▼                                             │
+│  6. DOWNSTREAM CONSUMERS                                               │
+│     ┌──────────────────────────────────────────┐                       │
+│     │  • CRM System: Customer profile          │                       │
+│     │  • Risk Engine: Credit assessment        │                       │
+│     │  • Marketing: Campaign targeting         │                       │
+│     │  • Compliance: KYC audit trail           │                       │
+│     └──────────────────────────────────────────┘                       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Customer data freshness | 24-48 hours | 15 minutes | 99% faster |
+| Single customer view | ❌ Not possible | ✅ Unified | New capability |
+| Report generation time | 2-3 days | 5 minutes | 99.9% faster |
+| Data reconciliation errors | 50+ per month | < 5 per month | 90% reduction |
+| Self-service analytics | ❌ IT dependent | ✅ Business users | New capability |
+
+---
+
+### Scenario 2: Real-Time Fraud Detection System
+
+> **Business Context:** A bank processes 2M+ card transactions daily and needs to detect fraud in real-time to minimize losses.
+
+#### The Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ Fraud detection runs in BATCH (next-day)                          │
+│   ❌ Fraud losses: $5M+ per month                                      │
+│   ❌ False positive rate: 40% (customer complaints)                    │
+│   ❌ Investigation takes 3-5 days per case                             │
+│   ❌ Cannot correlate across multiple systems                          │
+│                                                                         │
+│   Card Transaction → ETL (Nightly) → Fraud Rules → Alert (Next Day)    │
+│                                                                         │
+│   By the time fraud is detected, money is already gone!                │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### The Solution: Real-Time Streaming Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 REAL-TIME FRAUD DETECTION PLATFORM                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   DATA SOURCES (Real-time)                                             │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                │
+│   │ Card          │  │ ATM          │  │ Mobile       │                │
+│   │ Transactions  │  │ Transactions │  │ Payments     │                │
+│   │ (Visa/Master) │  │              │  │              │                │
+│   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                │
+│          │                  │                  │                        │
+│          └──────────────────┼──────────────────┘                        │
+│                             │                                          │
+│                    Kafka Topics:                                       │
+│                    • card-txn-stream                                   │
+│                    • atm-txn-stream                                    │
+│                    • mobile-pay-stream                                 │
+│                             │                                          │
+│                             ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APACHE FLINK (Stream Processing)             │  │
+│   │                                                                  │  │
+│   │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐    │  │
+│   │  │ Fraud Rule     │  │ ML Model       │  │ Velocity       │    │  │
+│   │  │ Engine         │  │ Scoring        │    │ Detection      │    │  │
+│   │  │                │  │                │  │                │    │  │
+│   │  │ • Amount >     │  │ • Random Forest│  │ • >5 txns in   │    │  │
+│   │  │   $10,000?     │  │ • 200+ features│  │   10 minutes   │    │  │
+│   │  │ • Foreign txn? │  │ • Real-time    │  │ • Unusual hour │    │  │
+│   │  │ • High-risk    │  │   inference    │  │ • Location     │    │  │
+│   │  │   country?     │  │                │  │   mismatch     │    │  │
+│   │  └────────────────┘  └────────────────┘  └────────────────┘    │  │
+│   │                                                                  │  │
+│   │  Combined Risk Score = 0.0 to 1.0                               │  │
+│   │  If score > 0.7 → BLOCK transaction + ALERT                    │  │
+│   │  If score > 0.4 → FLAG for review + LOG                        │  │
+│   │  If score < 0.4 → APPROVE transaction                          │  │
+│   │                                                                  │  │
+│   └───────────────────────────┬──────────────────────────────────────┘  │
+│                               │                                        │
+│              ┌────────────────┼────────────────┐                       │
+│              ▼                ▼                ▼                        │
+│   ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐      │
+│   │ REAL-TIME        │ │ FRAUD            │ │ ANALYTICS        │      │
+│   │ DASHBOARD        │ │ DATA LAKE        │ │ WAREHOUSE        │      │
+│   │                  │ │                  │ │                  │      │
+│   │ • Live fraud     │ │ • All txn data   │ │ • Historical     │      │
+│   │   alerts         │ │ • Model training │ │   analysis       │      │
+│   │ • Blocking       │ │ • Audit trail    │ │ • ML model       │      │
+│   │   statistics     │ │                  │ │   improvement    │      │
+│   │ • Geographic     │ │ /gold/fraud/     │ │ • Regulatory     │      │
+│   │   heatmap        │ │                  │ │   reports        │      │
+│   └──────────────────┘ └──────────────────┘ └──────────────────┘      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Fraud Detection Flow (Step-by-Step)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              FRAUD DETECTION: STEP-BY-STEP FLOW                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  STEP 1: TRANSACTION ARRIVES (< 1ms)                                   │
+│  ─────────────────────────────────────────                             │
+│  Customer swipes card at merchant POS                                   │
+│  → Visa/Master sends authorization request                             │
+│  → Bank's card switch captures transaction                             │
+│                                                                         │
+│  STEP 2: KAFKA PUBLISH (< 5ms)                                         │
+│  ─────────────────────────────────────────                             │
+│  Transaction published to Kafka topic:                                 │
+│  {
+│    "txn_id": "TXN-2024-01-15-001",
+│    "card_number": "****-****-****-1234",
+│    "amount": 2500.00,
+│    "currency": "USD",
+│    "merchant": "Electronics Store",
+│    "country": "Singapore",
+│    "timestamp": "2024-01-15T14:32:00Z"
+│  }
+│                                                                         │
+│  STEP 3: FLINK PROCESSING (< 100ms)                                    │
+│  ─────────────────────────────────────────                             │
+│  Flink job enriches and scores:                                        │
+│  • Customer profile lookup (Redis cache)                               │
+│  • Historical pattern analysis (window functions)                      │
+│  • ML model inference (TensorFlow Serving)                             │
+│  • Rule engine evaluation (Drools)                                     │
+│                                                                         │
+│  STEP 4: DECISION (< 200ms total)                                      │
+│  ─────────────────────────────────────────                             │
+│  Risk Score: 0.85 (HIGH)                                               │
+│  Reasons:                                                               │
+│  • Customer never transacted in Singapore before                       │
+│  • Amount 10x higher than average                                      │
+│  • 3 transactions in last 5 minutes (velocity)                        │
+│  • Time: 2:32 AM (unusual hour)                                       │
+│                                                                         │
+│  ACTION: BLOCK + SMS ALERT + FLAG FOR REVIEW                           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Fraud detection time | 24 hours | 200ms | 99.999% faster |
+| Fraud loss per month | $5M | $500K | 90% reduction |
+| False positive rate | 40% | 8% | 80% reduction |
+| Investigation time | 3-5 days | 2 hours | 95% faster |
+| Customer complaints | 500/month | 50/month | 90% reduction |
+
+---
+
+### Scenario 3: Regulatory Reporting Platform
+
+> **Business Context:** A bank must submit 50+ regulatory reports to the central bank (SBV/Fed/RBI) with strict deadlines and audit requirements.
+
+#### The Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ 50+ reports, each with different data requirements               │
+│   ❌ Manual data extraction from 10+ systems                           │
+│   ❌ Reports prepared in Excel (error-prone)                          │
+│   ❌ Missed deadlines (penalties: $100K+ per incident)                │
+│   ❌ Audit trail incomplete (compliance risk)                         │
+│                                                                         │
+│   Core Banking ─┐                                                      │
+│   Cards System ─┼─→ Manual Excel → Report Writer → SBV/Fed            │
+│   Loans System ─┤     (3-5 days)                                       │
+│   GL System ────┘                                                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### The Solution: Automated Regulatory Data Platform
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              AUTOMATED REGULATORY REPORTING PLATFORM                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA COLLECTION LAYER                         │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Core     │  │ Cards    │  │ Loans    │  │ Treasury │       │  │
+│   │  │ Banking  │  │ System   │  │ System   │  │ System   │       │  │
+│   │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘       │  │
+│   │       │              │             │              │             │  │
+│   │       └──────────────┴─────────────┴──────────────┘             │  │
+│   │                         │                                        │  │
+│   │                    CDC (Debezium)                                │  │
+│   │                         │                                        │  │
+│   └─────────────────────────┼────────────────────────────────────────┘  │
+│                             │                                          │
+│                             ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    PROCESSING LAYER                              │  │
+│   │                                                                  │  │
+│   │  ┌─────────────────────────────────────────────────────────┐    │  │
+│   │  │              Apache Kafka (Event Stream)                │    │  │
+│   │  └────────────────────────┬────────────────────────────────┘    │  │
+│   │                           │                                      │  │
+│   │         ┌─────────────────┼─────────────────┐                   │  │
+│   │         ▼                 ▼                 ▼                    │  │
+│   │  ┌────────────┐    ┌────────────┐    ┌────────────┐            │  │
+│   │  │ Spark      │    │ dbt        │    │ Airflow    │            │  │
+│   │  │ Processing │    │ Transform  │    │ Orchestrate│            │  │
+│   │  └────────────┘    └────────────┘    └────────────┘            │  │
+│   │                                                                  │  │
+│   └───────────────────────────┬──────────────────────────────────────┘  │
+│                               │                                        │
+│                             ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    REPORT DATA MARTS                            │  │
+│   │                                                                  │  │
+│   │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌──────────┐ │  │
+│   │  │ Capital    │  │ Liquidity  │  │ AML/CFT    │  │ Financial│ │  │
+│   │  │ Adequacy   │  │ Reports    │  │ Reports    │  │ Stability│ │  │
+│   │  │ (Basel III)│  │ (LCR/NSFR) │  │ (STR)      │  │ (Call Rpt)│ │  │
+│   │  └────────────┘  └────────────┘  └────────────┘  └──────────┘ │  │
+│   │                                                                  │  │
+│   └───────────────────────────┬──────────────────────────────────────┘  │
+│                               │                                        │
+│                             ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    GOVERNANCE & AUDIT                            │  │
+│   │                                                                  │  │
+│   │  • Data lineage: Source → Transformation → Report                │  │
+│   │  • Data quality checks at each layer                             │  │
+│   │  • Approval workflow (prepare → review → submit)                │  │
+│   │  • Audit trail: Who changed what, when                           │  │
+│   │  • Version control: Report snapshots for each submission        │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Report Generation Example: Basel III Capital Adequacy
+
+```python
+# Example: Automated Basel III Capital Adequacy Ratio Calculation
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import *
+
+spark = SparkSession.builder.appName("BaselIIICapitalAdequacy").getOrCreate()
+
+# 1. Load risk-weighted assets from Silver layer
+rwa_df = spark.read.parquet("/silver/risk_weighted_assets")
+
+# 2. Calculate Tier 1 and Tier 2 capital
+tier1_capital = (
+    spark.read.parquet("/silver/equity")
+    .agg(sum("common_equity").alias("cet1"),
+         sum("additional_tier1").alias("at1"))
+    .withColumn("tier1", col("cet1") + col("at1"))
+)
+
+tier2_capital = (
+    spark.read.parquet("/silver/subordinated_debt")
+    .agg(sum("eligible_amount").alias("tier2"))
+)
+
+# 3. Calculate ratios
+capital_ratio = (
+    tier1_capital.crossJoin(tier2_capital)
+    .crossJoin(rwa_df.agg(sum("rwa").alias("total_rwa")))
+    .withColumn("cet1_ratio", col("cet1") / col("total_rwa") * 100)
+    .withColumn("tier1_ratio", col("tier1") / col("total_rwa") * 100)
+    .withColumn("total_ratio", (col("tier1") + col("tier2")) / col("total_rwa") * 100)
+)
+
+# 4. Add regulatory thresholds
+capital_ratio = (
+    capital_ratio
+    .withColumn("cet1_compliant", col("cet1_ratio") >= 4.5)
+    .withColumn("tier1_compliant", col("tier1_ratio") >= 6.0)
+    .withColumn("total_compliant", col("total_ratio") >= 8.0)
+    .withColumn("buffer_included", col("total_ratio") >= 10.5)  # +2.5% buffer
+)
+
+# 5. Generate SBV report
+capital_ratio.write.mode("overwrite").parquet("/gold/regulatory/basel_iii")
+
+print("Basel III Capital Adequacy Report Generated:")
+capital_ratio.show()
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Report preparation time | 5 days | 2 hours | 99% faster |
+| Data accuracy | 95% | 99.9% | 99.9% accurate |
+| Missed deadlines | 3-4 per year | 0 | 100% on-time |
+| Audit findings | 20+ per audit | < 5 | 75% reduction |
+| Regulatory penalties | $500K/year | $0 | Eliminated |
+
+---
+
+### Scenario 4: Customer 360° View Platform
+
+> **Business Context:** A bank wants to provide relationship managers with a complete view of customer interactions across all products.
+
+#### The Problem
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CURRENT STATE (Before)                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ❌ Customer data scattered across 10+ systems                        │
+│   ❌ Relationship manager must log into 5 systems to get full view     │
+│   ❌ Cannot calculate total customer relationship value                │
+│   ❌ Cross-selling opportunities missed                                │
+│   ❌ Customer complaints about repetitive questions                    │
+│                                                                         │
+│   Customer calls: "I've been with you for 20 years,                    │
+│   and you still don't know I have a savings account AND a loan!"       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### The Solution: Customer 360° Data Product
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 CUSTOMER 360° DATA PLATFORM                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   DATA SOURCES                                                         │
+│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+│   │ Core     │ │ Cards    │ │ Loans    │ │ Digital  │ │ External │  │
+│   │ Banking  │ │ System   │ │ System   │ │ Channels │ │ (Credit) │  │
+│   │          │ │          │ │          │ │          │ │          │  │
+│   │ Accounts │ │ Card     │ │ Home     │ │ Mobile   │ │ Credit   │  │
+│   │ Deposits │ │ Txns     │ │ Loan     │ │ App      │ │ Score    │  │
+│   │ Fixed    │ │ Points   │ │ Personal │ │ Internet │ │ Bureau   │  │
+│   │ Deposits │ │          │ │ Loan     │ │ Banking  │ │ Data     │  │
+│   └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘  │
+│        │             │            │             │             │        │
+│        └─────────────┴────────────┴─────────────┴─────────────┘        │
+│                              │                                         │
+│                         CDC + APIs                                     │
+│                              │                                         │
+│                              ▼                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │              CUSTOMER 360° DATA LAKEHOUSE                       │  │
+│   │                                                                  │  │
+│   │  /bronze/raw/          → All raw customer data                 │  │
+│   │  /silver/customers/    → Cleansed, deduplicated                │  │
+│   │  /silver/products/     → All product holdings                  │  │
+│   │  /silver/transactions/ → Transaction history                   │  │
+│   │  /gold/customer_360/   → Unified customer view                 │  │
+│   │                                                                  │  │
+│   └───────────────────────────┬──────────────────────────────────────┘  │
+│                               │                                        │
+│                             ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │              CUSTOMER 360° DATA PRODUCT                         │  │
+│   │                                                                  │  │
+│   │  Schema:                                                        │  │
+│   │  ┌─────────────────────────────────────────────────────────┐   │  │
+│   │  │ customer_id          │ Customer unique identifier       │   │  │
+│   │  │ customer_name        │ Full name (masked)               │   │  │
+│   │  │ segment              │ RETAIL / PREMIUM / VIP           │   │  │
+│   │  │ relationship_value   │ Total value across all products  │   │  │
+│   │  │ total_deposits       │ Savings + Fixed Deposits         │   │  │
+│   │  │ total_loans          │ Home + Personal + Auto loans     │   │  │
+│   │  │ card_outstanding     │ Credit card balance              │   │  │
+│   │  │ risk_score           │ Internal risk rating             │   │  │
+│   │  │ last_interaction     │ Most recent touchpoint           │   │  │
+│   │  │ churn_risk           │ ML-predicted churn probability   │   │  │
+│   │  │ cross_sell_score     │ ML-predicted opportunity score   │   │  │
+│   │  └─────────────────────────────────────────────────────────┘   │  │
+│   │                                                                  │  │
+│   │  SLAs:                                                          │  │
+│   │  • Freshness: Updated every 15 minutes                         │  │
+│   │  • Completeness: 99.9% of customers                            │  │
+│   │  • Accuracy: Reconciled with source systems daily               │  │
+│   │                                                                  │  │
+│   └───────────────────────────┬──────────────────────────────────────┘  │
+│                               │                                        │
+│         ┌─────────────────────┼─────────────────────┐                  │
+│         ▼                     ▼                     ▼                   │
+│   ┌──────────┐          ┌──────────┐          ┌──────────┐            │
+│   │ CRM      │          │ Mobile   │          │ Analytics│            │
+│   │ System   │          │ App      │          │ Portal   │            │
+│   │          │          │          │          │          │            │
+│   │ RM sees  │          │ Customer │          │ Business │            │
+│   │ full     │          │ sees own │          │ users    │            │
+│   │ customer │          │ complete │          │ explore  │            │
+│   │ view     │          │ picture  │          │ data     │            │
+│   └──────────┘          └──────────┘          └──────────┘            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Customer 360° SQL Example
+
+```sql
+-- Relationship Manager Query: Customer 360° View
+SELECT 
+    c.customer_id,
+    c.customer_name,
+    c.segment,
+    c.relationship_value,
+    
+    -- Deposits
+    COALESCE(d.total_deposits, 0) AS total_deposits,
+    COALESCE(d.account_count, 0) AS deposit_accounts,
+    
+    -- Loans
+    COALESCE(l.total_loans, 0) AS total_loans,
+    COALESCE(l.emi_amount, 0) AS monthly_emi,
+    COALESCE(l.next_payment_date, NULL) AS next_emi_date,
+    
+    -- Credit Card
+    COALESCE(cc.card_outstanding, 0) AS card_outstanding,
+    COALESCE(cc.available_credit, 0) AS available_credit,
+    COALESCE(cc.rewards_points, 0) AS rewards_points,
+    
+    -- Digital Engagement
+    de.last_login_date,
+    de.mobile_app_usage_days,
+    
+    -- Risk & Opportunity
+    r.risk_score,
+    r.churn_risk,
+    r.cross_sell_score,
+    
+    -- Calculated Fields
+    (COALESCE(d.total_deposits, 0) + 
+     COALESCE(l.total_loans, 0) + 
+     COALESCE(cc.card_outstanding, 0)) AS total_relationship_value,
+    
+    -- Recommendation
+    CASE 
+        WHEN r.cross_sell_score > 0.7 THEN 'HIGH - Propose Investment Product'
+        WHEN r.churn_risk > 0.6 THEN 'MEDIUM - Retention Call Needed'
+        WHEN l.total_loans = 0 AND d.total_deposits > 100000000 THEN 'OPPORTUNITY - Pre-approved Loan'
+        ELSE 'MAINTAIN - Regular Service'
+    END AS recommended_action
+    
+FROM gold.customer_360 c
+LEFT JOIN gold.customer_deposits d ON c.customer_id = d.customer_id
+LEFT JOIN gold.customer_loans l ON c.customer_id = l.customer_id
+LEFT JOIN gold.customer_cards cc ON c.customer_id = cc.customer_id
+LEFT JOIN gold.customer_digital de ON c.customer_id = de.customer_id
+LEFT JOIN gold.customer_risk r ON c.customer_id = r.customer_id
+WHERE c.customer_id = 'CUST-12345';
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Customer view preparation | 30 minutes | 5 seconds | 99.9% faster |
+| Cross-sell conversion rate | 2% | 12% | 6x improvement |
+| Customer satisfaction (CSAT) | 65% | 85% | 30% increase |
+| Customer churn rate | 15% | 8% | 47% reduction |
+| Relationship manager productivity | 20 calls/day | 50 calls/day | 2.5x improvement |
+
+---
+
+### Scenario Comparison Matrix
+
+| Aspect | Retail Platform | Fraud Detection | Regulatory | Customer 360° |
+|--------|----------------|-----------------|------------|---------------|
+| **Primary Pattern** | Medallion Architecture | Real-time Streaming | Batch + CDC | Data Product |
+| **Latency** | Near-real-time (15 min) | Real-time (200ms) | Batch (daily) | Near-real-time (15 min) |
+| **Key Technologies** | Spark, Delta Lake, dbt | Flink, Kafka, ML | Airflow, dbt, Spark | Spark, Unity Catalog |
+| **Data Volume** | 100GB/day | 1M events/sec | 500GB/day | 10GB/day |
+| **Primary Users** | Analysts, Data Scientists | Fraud Ops, Compliance | Regulatory Team | Relationship Managers |
+| **Business Value** | Operational efficiency | Loss prevention | Compliance | Revenue growth |
+| **Complexity** | Medium | High | Medium | Low-Medium |
+
+### When to Use Each Pattern
+
+| Scenario | Recommended Pattern | Why |
+|----------|---------------------|-----|
+| Historical analytics & reporting | Medallion Architecture | Optimized for batch processing and aggregation |
+| Real-time fraud or anomaly detection | Stream Processing (Flink/Kafka) | Sub-second latency required |
+| Regulatory compliance reporting | Batch + CDC + Governance | Data accuracy and audit trail critical |
+| Customer-facing applications | Data Products (Data Mesh) | Self-serve, discoverable, with SLAs |
+| Multi-cloud integration | Data Fabric | AI-powered metadata layer for discovery |
+
+---
 
 ---
 

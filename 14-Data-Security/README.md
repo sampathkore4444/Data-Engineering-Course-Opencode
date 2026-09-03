@@ -6,6 +6,11 @@
 3. [Access Control](#3-access-control)
 4. [Compliance Regulations](#4-compliance-regulations)
 5. [Real-World Scenarios](#5-real-world-scenarios)
+   - [Scenario 1: Banking Customer Data Protection](#scenario-1-banking-customer-data-protection)
+   - [Scenario 2: PCI DSS Card Data Security](#scenario-2-pci-dss-card-data-security)
+   - [Scenario 3: Fraud Detection System Security](#scenario-3-fraud-detection-system-security)
+   - [Scenario 4: Regulatory Reporting Security](#scenario-4-regulatory-reporting-security)
+   - [Scenario 5: Multi-Bank Data Sharing Security](#scenario-5-multi-bank-data-sharing-security)
 6. [Hands-On Exercises](#6-hands-on-exercises)
 7. [Interview Questions](#7-interview-questions)
 
@@ -1095,52 +1100,1107 @@ CREATE TABLE tokenization_map (
 
 ## 5. Real-World Scenarios
 
-### Scenario 1: Healthcare Data Security (HIPAA)
+### Overview
+
+This section presents **5 complete banking data security scenarios** that demonstrate how to implement comprehensive security controls for sensitive financial data. Each scenario includes the threat model, security architecture, implementation code, and compliance requirements.
+
+---
+
+### Scenario 1: Banking Customer Data Protection
+
+> **Business Context:** A bank must protect 10M+ customer records containing PII (SSN, account numbers, contact info) while enabling analytics and regulatory reporting.
+
+#### Threat Model
 
 ```
-Security Architecture:
-
-+------------------+     +------------------+     +------------------+
-| Network Layer    |     | Application Layer|     | Data Layer       |
-| - VPC isolation  |     | - MFA/SSO        |     | - AES-256 at rest|
-| - Private subnet |     | - RBAC + ABAC    |     | - TLS 1.3 transit|
-| - WAF            |     | - Audit logging  |     | - Column-level   |
-| - VPN for remote |     | - Session mgmt   |     |   encryption     |
-+------------------+     +------------------+     +------------------+
-                              |                           |
-                              v                           v
-                    +------------------+         +------------------+
-                    | Monitoring       |         | Compliance       |
-                    | - SIEM           |         | - HIPAA controls |
-                    | - Anomaly detect |         | - Audit reports  |
-                    | - Alerting       |         | - Risk assessment|
-                    +------------------+         +------------------+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    THREAT LANDSCAPE                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   INTERNAL THREATS:                                                     │
+│   • Database administrators accessing customer PII                     │
+│   • Developers copying production data to dev environments             │
+│   • Analysts querying full customer tables                              │
+│   • Privileged users bypassing access controls                         │
+│                                                                         │
+│   EXTERNAL THREATS:                                                     │
+│   • SQL injection attacks on application layer                         │
+│   • Network interception of database connections                       │
+│   • Physical theft of database backups                                 │
+│   • Insider threats (malicious employees)                              │
+│                                                                         │
+│   COMPLIANCE REQUIREMENTS:                                              │
+│   • PCI DSS: Protect cardholder data                                   │
+│   • GDPR: Right to erasure, data portability                          │
+│   • SOX: Financial data integrity                                      │
+│   • Local banking regulations (SBV, Fed, RBI)                          │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Scenario 2: Financial Data Security (PCI DSS)
+#### Security Architecture
 
 ```
-Cardholder Data Environment:
-
-1. Network Segmentation
-   - Isolate CDE from other networks
-   - Firewall rules restrict access
-
-2. Access Control
-   - MFA for all access
-   - Least privilege principle
-   - Regular access reviews
-
-3. Encryption
-   - AES-256 for stored card data
-   - TLS 1.3 for transmission
-   - Key rotation every 90 days
-
-4. Monitoring
-   - Real-time fraud detection
-   - Audit logging all access
-   - Quarterly vulnerability scans
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 BANKING DATA SECURITY ARCHITECTURE                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    NETWORK LAYER                                 │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ VPC      │  │ Private  │  │ WAF      │  │ VPN      │       │  │
+│   │  │ Isolation│  │ Subnet   │  │ Firewall │  │ Remote   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    APPLICATION LAYER                             │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ MFA/SSO  │  │ RBAC +   │  │ API      │  │ Session  │       │  │
+│   │  │          │  │ ABAC     │  │ Gateway  │  │ Mgmt     │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA LAYER                                    │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ AES-256  │  │ Column-  │  │ Dynamic  │  │ Data     │       │  │
+│   │  │ at Rest  │  │ Level    │  │ Masking  │  │ Tokenizn │       │  │
+│   │  │          │  │ Encrypt  │  │          │  │          │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    MONITORING & COMPLIANCE                       │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ SIEM     │  │ Audit    │  │ DLP      │  │ Anomaly  │       │  │
+│   │  │ Logging  │  │ Trail    │  │ Alerts   │  │ Detect   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+#### Implementation Code
+
+```sql
+-- ============================================================
+-- 1. ENCRYPTION AT REST (Column-Level for PII)
+-- ============================================================
+
+-- Create encrypted customer table
+CREATE TABLE customers_encrypted (
+    customer_id SERIAL PRIMARY KEY,
+    -- Non-sensitive columns (plain text)
+    customer_name VARCHAR(100),
+    email VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Sensitive columns (encrypted)
+    ssn_encrypted BYTEA NOT NULL,
+    account_number_encrypted BYTEA NOT NULL,
+    phone_encrypted BYTEA,
+    address_encrypted BYTEA,
+    
+    -- Metadata for key management
+    encryption_key_id VARCHAR(50),
+    encryption_version INT DEFAULT 1
+);
+
+-- Insert with encryption
+INSERT INTO customers_encrypted (
+    customer_name, email, ssn_encrypted, account_number_encrypted, phone_encrypted
+) VALUES (
+    'John Smith',
+    'john.smith@email.com',
+    pgp_sym_encrypt('123-45-6789', 'bank_master_key_v1'),
+    pgp_sym_encrypt('1234567890', 'bank_master_key_v1'),
+    pgp_sym_encrypt('+84-901-234-567', 'bank_master_key_v1')
+);
+
+-- Authorized query (with decryption)
+SELECT 
+    customer_id,
+    customer_name,
+    email,
+    pgp_sym_decrypt(ssn_encrypted, 'bank_master_key_v1') as ssn,
+    pgp_sym_decrypt(account_number_encrypted, 'bank_master_key_v1') as account_number
+FROM customers_encrypted
+WHERE customer_id = 1;
+
+-- ============================================================
+-- 2. ROW-LEVEL SECURITY (Region-Based Access)
+-- ============================================================
+
+-- Enable RLS on customer table
+ALTER TABLE customers_encrypted ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for different roles
+CREATE POLICY analyst_region_policy ON customers_encrypted
+    FOR SELECT
+    TO data_analyst
+    USING ( 
+        -- Analysts can only see customers from their region
+        EXISTS (
+            SELECT 1 FROM customer_regions cr
+            WHERE cr.customer_id = customers_encrypted.customer_id
+              AND cr.region = current_setting('app.user_region')
+        )
+    );
+
+CREATE POLICY compliance_full_access ON customers_encrypted
+    FOR SELECT
+    TO compliance_officer
+    USING (true);  -- Compliance can see all
+
+-- ============================================================
+-- 3. DYNAMIC DATA MASKING
+-- ============================================================
+
+-- Create masking policy for SSN
+CREATE OR REPLACE FUNCTION mask_ssn(ssn BYTEA, user_role TEXT)
+RETURNS TEXT AS $$
+BEGIN
+    IF user_role = 'admin' OR user_role = 'compliance' THEN
+        RETURN pgp_sym_decrypt(ssn, 'bank_master_key_v1');
+    ELSIF user_role = 'analyst' THEN
+        -- Show only last 4 digits
+        RETURN 'XXX-XX-' || RIGHT(pgp_sym_decrypt(ssn, 'bank_master_key_v1'), 4);
+    ELSE
+        RETURN 'XXX-XX-XXXX';
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create view with masking
+CREATE VIEW customers_masked AS
+SELECT 
+    customer_id,
+    customer_name,
+    email,
+    mask_ssn(ssn_encrypted, current_setting('app.user_role')) as ssn,
+    CASE 
+        WHEN current_setting('app.user_role') IN ('admin', 'compliance') 
+        THEN pgp_sym_decrypt(account_number_encrypted, 'bank_master_key_v1')
+        ELSE CONCAT('****', RIGHT(pgp_sym_decrypt(account_number_encrypted, 'bank_master_key_v1'), 4))
+    END as account_number
+FROM customers_encrypted;
+
+-- ============================================================
+-- 4. AUDIT LOGGING
+-- ============================================================
+
+-- Create audit log table
+CREATE TABLE customer_access_audit (
+    audit_id SERIAL PRIMARY KEY,
+    customer_id INT,
+    access_type VARCHAR(20),  -- SELECT, INSERT, UPDATE, DELETE
+    accessed_columns TEXT[],
+    user_name VARCHAR(100),
+    user_role VARCHAR(50),
+    user_ip INET,
+    access_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    query_text TEXT
+);
+
+-- Create audit trigger
+CREATE OR REPLACE FUNCTION audit_customer_access()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO customer_access_audit (
+        customer_id, access_type, accessed_columns, user_name, user_role, user_ip
+    ) VALUES (
+        COALESCE(NEW.customer_id, OLD.customer_id),
+        TG_OP,
+        ARRAY[TG_TABLE_NAME],
+        current_user,
+        current_setting('app.user_role', true),
+        inet_client_addr()
+    );
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER audit_customers_trigger
+    AFTER SELECT OR INSERT OR UPDATE OR DELETE ON customers_encrypted
+    FOR EACH ROW EXECUTE FUNCTION audit_customer_access();
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| PII exposure risk | High (plain text) | Low (encrypted) | 95% risk reduction |
+| Compliance findings | 25+ per audit | < 5 per audit | 80% reduction |
+| Data breach impact | Catastrophic | Contained | Limited exposure |
+| Access control | Basic RBAC | RBAC + RLS + Masking | Defense in depth |
+| Audit trail | None | Complete | Full visibility |
+
+---
+
+### Scenario 2: PCI DSS Card Data Security
+
+> **Business Context:** A bank processes 5M+ card transactions daily and must comply with PCI DSS requirements for cardholder data protection.
+
+#### PCI DSS Requirements
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    PCI DSS REQUIREMENTS (12 DOMAINS)                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   1. Install and maintain network security controls                    │
+│   2. Apply secure configurations to all system components              │
+│   3. Protect stored account data                                       │
+│   4. Protect cardholder data with strong cryptography during transit   │
+│   5. Protect all systems and networks from malicious software          │
+│   6. Develop and maintain secure systems and software                  │
+│   7. Restrict access to system components by business need-to-know     │
+│   8. Identify users and authenticate access to system components       │
+│   9. Restrict physical access to cardholder data                       │
+│   10. Log and monitor all access to network resources and card data    │
+│   11. Test security of systems and networks regularly                  │
+│   12. Support information security with organizational policies         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Cardholder Data Environment (CDE) Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 CARDHOLDER DATA ENVIRONMENT (CDE)                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    OUTSIDE CDE                                   │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Corporate│  │ Email    │  │ Web      │  │ General  │       │  │
+│   │  │ Network  │  │ Server   │  │ Server   │  │ Apps     │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                    ══════════╪═══════════  FIREWALL                    │
+│                              │                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    INSIDE CDE (Restricted)                       │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Payment  │  │ Card     │  │ Fraud    │  │ Tokenizn │       │  │
+│   │  │ Gateway  │  │ Switch   │  │ Detect   │  │ Service  │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │              CARD DATA STORAGE (Encrypted)                 │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────────────────────────────────────────────────┐ │ │  │
+│   │  │  │ card_data_encrypted                                  │ │ │  │
+│   │  │  │ - card_number_encrypted (AES-256)                    │ │ │  │
+│   │  │  │ - expiry_date_encrypted                              │ │ │  │
+│   │  │  │ - cardholder_name_encrypted                          │ │ │  │
+│   │  │  │ - token (replaces PAN for non-CDE systems)          │ │ │  │
+│   │  │  └──────────────────────────────────────────────────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```sql
+-- ============================================================
+-- 1. TOKENIZATION (Replace PAN with tokens outside CDE)
+-- ============================================================
+
+-- Token vault (inside CDE, highly secured)
+CREATE TABLE card_token_vault (
+    token UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pan_encrypted BYTEA NOT NULL,  -- Encrypted Primary Account Number
+    last_four_digits VARCHAR(4),    -- For display purposes
+    expiry_date_encrypted BYTEA,
+    cardholder_name_encrypted BYTEA,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Create tokenization function
+CREATE OR REPLACE FUNCTION tokenize_card(
+    p_pan TEXT,
+    p_expiry DATE,
+    p_name TEXT
+) RETURNS UUID AS $$
+DECLARE
+    v_token UUID;
+BEGIN
+    -- Generate token
+    v_token := gen_random_uuid();
+    
+    -- Store encrypted PAN in vault
+    INSERT INTO card_token_vault (
+        token, pan_encrypted, last_four_digits, 
+        expiry_date_encrypted, cardholder_name_encrypted, expires_at
+    ) VALUES (
+        v_token,
+        pgp_sym_encrypt(p_pan, 'card_vault_key'),
+        RIGHT(p_pan, 4),
+        pgp_sym_encrypt(p_expiry::TEXT, 'card_vault_key'),
+        pgp_sym_encrypt(p_name, 'card_vault_key'),
+        CURRENT_TIMESTAMP + INTERVAL '5 years'
+    );
+    
+    RETURN v_token;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Tokenize a card
+SELECT tokenize_card('4111111111111234', '2025-12-31', 'John Smith');
+-- Returns: UUID token (e.g., 'a1b2c3d4-e5f6-7890-abcd-ef1234567890')
+
+-- ============================================================
+-- 2. USE TOKENS IN NON-CDE SYSTEMS
+-- ============================================================
+
+-- Transactions table (uses token, NOT PAN)
+CREATE TABLE card_transactions (
+    transaction_id SERIAL PRIMARY KEY,
+    card_token UUID NOT NULL REFERENCES card_token_vault(token),
+    amount DECIMAL(12,2),
+    merchant_id VARCHAR(50),
+    transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20)
+);
+
+-- Application code uses token, never sees PAN
+INSERT INTO card_transactions (card_token, amount, merchant_id)
+VALUES ('a1b2c3d4-e5f6-7890-abcd-ef1234567890', 150.00, 'MERCH-001');
+
+-- ============================================================
+-- 3. DETOKENIZE ONLY WHEN NECESSARY (inside CDE)
+-- ============================================================
+
+-- Function to detokenize (restricted access)
+CREATE OR REPLACE FUNCTION detokenize_card(p_token UUID)
+RETURNS TABLE(
+    last_four VARCHAR(4),
+    expiry_date DATE,
+    cardholder_name TEXT
+) AS $$
+BEGIN
+    -- Log access for audit
+    INSERT INTO card_access_audit (token, access_type, user_name)
+    VALUES (p_token, 'DETOKENIZE', current_user);
+    
+    RETURN QUERY
+    SELECT 
+        v.last_four_digits,
+        (pgp_sym_decrypt(v.expiry_date_encrypted, 'card_vault_key'))::DATE,
+        pgp_sym_decrypt(v.cardholder_name_encrypted, 'card_vault_key')::TEXT
+    FROM card_token_vault v
+    WHERE v.token = p_token AND v.is_active = TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- 4. CARD ACCESS AUDIT LOG
+-- ============================================================
+
+CREATE TABLE card_access_audit (
+    audit_id SERIAL PRIMARY KEY,
+    token UUID,
+    access_type VARCHAR(20),  -- TOKENIZE, DETOKENIZE, VIEW
+    user_name VARCHAR(100),
+    user_ip INET,
+    access_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Enable row-level security on card data
+ALTER TABLE card_token_vault ENABLE ROW LEVEL SECURITY;
+
+-- Only CDE users can access card vault
+CREATE POLICY cde_access_policy ON card_token_vault
+    FOR ALL
+    TO cde_application
+    USING (true);
+
+-- Non-CDE users cannot access vault at all
+CREATE POLICY deny_non_cde_access ON card_token_vault
+    FOR ALL
+    TO application_user
+    USING (false);
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| PCI DSS scope | Entire data warehouse | CDE only (5% of systems) | 95% scope reduction |
+| PAN exposure | Multiple systems | CDE only | Isolated |
+| Token usage | None | All non-CDE systems | Zero PAN exposure |
+| Audit trail | Partial | Complete | Full visibility |
+| Compliance cost | $500K/year | $200K/year | 60% reduction |
+
+---
+
+### Scenario 3: Fraud Detection System Security
+
+> **Business Context:** A bank's fraud detection system processes 2M+ transactions daily and must protect both transaction data and fraud models from unauthorized access.
+
+#### Threat Model
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    FRAUD DETECTION SECURITY THREATS                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   DATA THREATS:                                                        │
+│   • Real-time transaction data interception                           │
+│   • Historical transaction data exfiltration                          │
+│   • Customer behavior profile theft                                    │
+│   • Fraud model intellectual property theft                            │
+│                                                                         │
+│   MODEL THREATS:                                                       │
+│   • Adversarial attacks to bypass fraud detection                     │
+│   • Model poisoning with fake training data                           │
+│   • Model inversion to extract customer information                   │
+│   • Unauthorized model modifications                                  │
+│                                                                         │
+│   OPERATIONAL THREATS:                                                 │
+│   • Alert fatigue from false positives                                │
+│   • Delayed detection due to system compromise                        │
+│   • Insider manipulation of fraud rules                               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Security Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              FRAUD DETECTION SECURITY ARCHITECTURE                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA INGESTION LAYER                          │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ TLS 1.3  │  │ Schema   │  │ Rate     │  │ Input    │       │  │
+│   │  │ Encrypt  │  │ Validatn │  │ Limiting │  │ Validatn │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    PROCESSING LAYER (Isolated)                   │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Encrypted│  │ Model    │  │ Feature  │  │ Score    │       │  │
+│   │  │ Compute  │  │ Serving  │  │ Store    │  │ Engine   │       │  │
+│   │  │ (TEE)    │  │ (Isolatd)│  │ (Encrypt)│  │          │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    MODEL MANAGEMENT LAYER                        │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Model    │  │ Version  │  │ Access   │  │ Audit    │       │  │
+│   │  │ Registry │  │ Control  │  │ Control  │  │ Logging  │       │  │
+│   │  │ (MLflow) │  │ (Git)    │  │ (RBAC)   │  │ (SIEM)   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    MONITORING LAYER                               │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Anomaly  │  │ Alert    │  │ Incident │  │ Forensics│       │  │
+│   │  │ Detection│  │ Mgmt     │  │ Response │  │ Analysis │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+# ============================================================
+# 1. SECURE TRANSACTION INGESTION
+# ============================================================
+
+import ssl
+import hashlib
+from cryptography.fernet import Fernet
+from datetime import datetime
+
+class SecureTransactionIngestion:
+    def __init__(self):
+        self.encryption_key = self._load_encryption_key()
+        self.fernet = Fernet(self.encryption_key)
+    
+    def _load_encryption_key(self):
+        """Load encryption key from secure vault."""
+        # In production: Load from HashiCorp Vault or AWS KMS
+        return Fernet.generate_key()
+    
+    def ingest_transaction(self, transaction: dict) -> dict:
+        """Ingest transaction with security controls."""
+        # 1. Input validation
+        self._validate_transaction(transaction)
+        
+        # 2. Rate limiting check
+        self._check_rate_limit(transaction['card_token'])
+        
+        # 3. Encrypt sensitive fields
+        encrypted_transaction = self._encrypt_sensitive_fields(transaction)
+        
+        # 4. Add integrity hash
+        encrypted_transaction['integrity_hash'] = self._compute_hash(transaction)
+        
+        # 5. Log access
+        self._log_ingestion(transaction['transaction_id'])
+        
+        return encrypted_transaction
+    
+    def _validate_transaction(self, transaction: dict):
+        """Validate transaction schema and values."""
+        required_fields = ['transaction_id', 'card_token', 'amount', 'merchant_id']
+        for field in required_fields:
+            if field not in transaction:
+                raise ValueError(f"Missing required field: {field}")
+        
+        if transaction['amount'] <= 0:
+            raise ValueError("Invalid transaction amount")
+    
+    def _encrypt_sensitive_fields(self, transaction: dict) -> dict:
+        """Encrypt sensitive transaction fields."""
+        encrypted = transaction.copy()
+        
+        # Encrypt card token
+        encrypted['card_token_encrypted'] = self.fernet.encrypt(
+            transaction['card_token'].encode()
+        )
+        
+        # Remove plain text sensitive data
+        del encrypted['card_token']
+        
+        return encrypted
+    
+    def _compute_hash(self, transaction: dict) -> str:
+        """Compute integrity hash for tamper detection."""
+        data_str = f"{transaction['transaction_id']}:{transaction['amount']}:{transaction['merchant_id']}"
+        return hashlib.sha256(data_str.encode()).hexdigest()
+
+# ============================================================
+# 2. SECURE FRAUD MODEL SERVING
+# ============================================================
+
+class SecureFraudModel:
+    def __init__(self, model_path: str):
+        self.model = self._load_model_securely(model_path)
+        self.access_log = []
+    
+    def _load_model_securely(self, model_path: str):
+        """Load model with integrity verification."""
+        import joblib
+        
+        # 1. Verify model signature
+        if not self._verify_model_signature(model_path):
+            raise SecurityError("Model signature verification failed")
+        
+        # 2. Load in isolated environment
+        model = joblib.load(model_path)
+        
+        # 3. Log model load
+        self._log_model_access('LOAD', model_path)
+        
+        return model
+    
+    def predict_fraud(self, features: dict) -> dict:
+        """Predict fraud with security controls."""
+        # 1. Validate input features
+        self._validate_features(features)
+        
+        # 2. Check user authorization
+        if not self._check_authorization(features.get('user_id')):
+            raise PermissionError("Unauthorized fraud prediction request")
+        
+        # 3. Make prediction
+        prediction = self.model.predict([features['feature_vector']])
+        probability = self.model.predict_proba([features['feature_vector']])
+        
+        # 4. Log prediction (without sensitive features)
+        self._log_prediction(features['transaction_id'], prediction[0])
+        
+        return {
+            'transaction_id': features['transaction_id'],
+            'is_fraud': bool(prediction[0]),
+            'fraud_probability': float(probability[0][1]),
+            'model_version': self.model.version
+        }
+    
+    def _verify_model_signature(self, model_path: str) -> bool:
+        """Verify model hasn't been tampered with."""
+        import os
+        
+        # Check file integrity
+        expected_hash = self._get_expected_hash(model_path)
+        actual_hash = self._compute_file_hash(model_path)
+        
+        return expected_hash == actual_hash
+
+# ============================================================
+# 3. ACCESS CONTROL FOR FRAUD TEAM
+# ============================================================
+
+# Role definitions
+FRAUD_ROLES = {
+    'fraud_analyst': {
+        'permissions': ['read_transactions', 'read_alerts', 'create_cases'],
+        'data_access': ['transactions_last_30_days', 'customer_profiles'],
+        'model_access': ['view_scores'],
+    },
+    'fraud_investigator': {
+        'permissions': ['read_transactions', 'read_alerts', 'update_cases', 'export_data'],
+        'data_access': ['transactions_last_90_days', 'customer_profiles', 'case_history'],
+        'model_access': ['view_scores', 'view_feature_importance'],
+    },
+    'fraud_manager': {
+        'permissions': ['all'],
+        'data_access': ['all'],
+        'model_access': ['all'],
+    }
+}
+
+def check_fraud_access(user_role: str, requested_action: str, resource: str) -> bool:
+    """Check if user has access to requested resource."""
+    if user_role not in FRAUD_ROLES:
+        return False
+    
+    role_config = FRAUD_ROLES[user_role]
+    
+    # Check permission
+    if requested_action not in role_config['permissions'] and 'all' not in role_config['permissions']:
+        return False
+    
+    # Check data access
+    if resource.startswith('transactions_'):
+        return resource in role_config['data_access'] or 'all' in role_config['data_access']
+    
+    return True
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Model integrity | No verification | Signature verified | Tamper-proof |
+| Access control | Basic RBAC | RBAC + resource-level | Fine-grained |
+| Audit trail | Partial | Complete | Full visibility |
+| Incident response | 24 hours | 2 hours | 92% faster |
+| False positive handling | Manual | Automated | 80% automation |
+
+---
+
+### Scenario 4: Regulatory Reporting Security
+
+> **Business Context:** A bank must generate and submit 50+ regulatory reports daily while ensuring data integrity and preventing unauthorized modifications.
+
+#### Security Requirements
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                 REGULATORY REPORTING SECURITY                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   DATA INTEGRITY:                                                      │
+│   • Reports must be tamper-proof after generation                      │
+│   • Digital signatures required for submission                         │
+│   • Chain of custody for all data transformations                     │
+│                                                                         │
+│   ACCESS CONTROL:                                                      │
+│   • Segregation of duties (prepare → review → approve → submit)       │
+│   • No single person can complete entire process                       │
+│   • Audit trail for all report modifications                           │
+│                                                                         │
+│   CONFIDENTIALITY:                                                     │
+│   • Reports contain sensitive financial data                          │
+│   • Access restricted to authorized personnel                          │
+│   • Secure transmission to regulators                                  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.backends import default_backend
+import json
+from datetime import datetime
+
+class SecureRegulatoryReporting:
+    def __init__(self):
+        self.private_key = self._load_private_key()
+        self.public_key = self.private_key.public_key()
+    
+    def _load_private_key(self):
+        """Load private key from secure storage."""
+        # In production: Load from HSM or secure vault
+        return rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+    
+    def generate_report(self, report_type: str, data: dict, prepared_by: str) -> dict:
+        """Generate report with integrity controls."""
+        report = {
+            'report_id': self._generate_report_id(),
+            'report_type': report_type,
+            'data': data,
+            'metadata': {
+                'prepared_by': prepared_by,
+                'prepared_at': datetime.now().isoformat(),
+                'data_hash': self._compute_data_hash(data),
+                'status': 'PREPARED'
+            },
+            'workflow': {
+                'prepared_by': prepared_by,
+                'reviewed_by': None,
+                'approved_by': None,
+                'submitted_by': None
+            }
+        }
+        
+        # Sign the report
+        report['signature'] = self._sign_report(report)
+        
+        return report
+    
+    def review_report(self, report: dict, reviewer: str) -> dict:
+        """Review report with segregation of duties."""
+        # Verify signature
+        if not self._verify_signature(report):
+            raise SecurityError("Report signature verification failed")
+        
+        # Check segregation of duties
+        if report['workflow']['prepared_by'] == reviewer:
+            raise PermissionError("Reviewer cannot be same as preparer")
+        
+        report['workflow']['reviewed_by'] = reviewer
+        report['metadata']['status'] = 'REVIEWED'
+        report['metadata']['reviewed_at'] = datetime.now().isoformat()
+        
+        # Re-sign after modification
+        report['signature'] = self._sign_report(report)
+        
+        return report
+    
+    def approve_report(self, report: dict, approver: str) -> dict:
+        """Approve report for submission."""
+        # Verify previous steps completed
+        if report['workflow']['reviewed_by'] is None:
+            raise ValueError("Report must be reviewed before approval")
+        
+        # Check segregation of duties
+        if approver in [report['workflow']['prepared_by'], report['workflow']['reviewed_by']]:
+            raise PermissionError("Approver cannot be preparer or reviewer")
+        
+        report['workflow']['approved_by'] = approver
+        report['metadata']['status'] = 'APPROVED'
+        report['metadata']['approved_at'] = datetime.now().isoformat()
+        
+        # Re-sign
+        report['signature'] = self._sign_report(report)
+        
+        return report
+    
+    def _sign_report(self, report: dict) -> str:
+        """Create digital signature for report."""
+        report_bytes = json.dumps(report['data'], sort_keys=True).encode()
+        
+        signature = self.private_key.sign(
+            report_bytes,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        
+        return signature.hex()
+    
+    def _verify_signature(self, report: dict) -> bool:
+        """Verify report signature."""
+        try:
+            signature = bytes.fromhex(report['signature'])
+            report_bytes = json.dumps(report['data'], sort_keys=True).encode()
+            
+            self.public_key.verify(
+                signature,
+                report_bytes,
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+            return True
+        except Exception:
+            return False
+
+# ============================================================
+# AUDIT TRAIL FOR REPORTS
+# ============================================================
+
+class ReportAuditTrail:
+    def __init__(self):
+        self.audit_log = []
+    
+    def log_event(self, report_id: str, event_type: str, user: str, details: dict):
+        """Log report event for audit."""
+        event = {
+            'timestamp': datetime.now().isoformat(),
+            'report_id': report_id,
+            'event_type': event_type,
+            'user': user,
+            'details': details,
+            'ip_address': self._get_client_ip()
+        }
+        
+        self.audit_log.append(event)
+        
+        # In production: Send to SIEM system
+        self._send_to_siem(event)
+    
+    def get_audit_trail(self, report_id: str) -> list:
+        """Get complete audit trail for a report."""
+        return [e for e in self.audit_log if e['report_id'] == report_id]
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Report integrity | Manual verification | Digital signatures | Tamper-proof |
+| Segregation of duties | Policy only | Enforced in code | 100% compliance |
+| Audit trail | Partial | Complete | Full traceability |
+| Submission security | Email | Encrypted channel | Secure transmission |
+| Compliance findings | 15+ per audit | 0 | Zero findings |
+
+---
+
+### Scenario 5: Multi-Bank Data Sharing Security
+
+> **Business Context:** Multiple banks need to share anonymized fraud data to improve detection while preserving customer privacy.
+
+#### Privacy-Preserving Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              PRIVACY-PRESERVING DATA SHARING                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    BANK A                                         │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐                     │  │
+│   │  │ Raw      │  │ Anonymizn│  │ Shared   │                     │  │
+│   │  │ Data     │──▶│ Engine   │──▶│ Dataset  │                     │  │
+│   │  │ (Local)  │  │          │  │          │                     │  │
+│   │  └──────────┘  └──────────┘  └────┬─────┘                     │  │
+│   │                                    │                           │  │
+│   └────────────────────────────────────┼───────────────────────────┘  │
+│                                        │                               │
+│                                        ▼                               │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    SECURE DATA EXCHANGE                          │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Federated│  │ Differential│  │ Secure │  │ Access   │       │  │
+│   │  │ Learning │  │ Privacy  │  │ MPC      │  │ Control  │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                        │                               │
+│                    ┌───────────────────┼───────────────────┐          │
+│                    ▼                   ▼                   ▼          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    BANK B              BANK C                     │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Shared   │  │ Local    │  │ Shared   │  │ Local    │       │  │
+│   │  │ Dataset  │──▶│ Model    │  │ Dataset  │──▶│ Model    │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+import numpy as np
+from typing import List, Dict
+import hashlib
+
+class PrivacyPreservingDataSharing:
+    def __init__(self, bank_id: str):
+        self.bank_id = bank_id
+        self.anonymization_key = self._generate_anonymization_key()
+    
+    def anonymize_transaction_data(self, transactions: List[Dict]) -> List[Dict]:
+        """Anonymize transaction data for sharing."""
+        anonymized = []
+        
+        for txn in transactions:
+            anonymized_txn = {
+                # K-anonymity: Generalize quasi-identifiers
+                'transaction_date': self._generalize_date(txn['transaction_date']),
+                'amount_range': self._generalize_amount(txn['amount']),
+                'merchant_category': txn['merchant_category'],
+                'transaction_type': txn['transaction_type'],
+                
+                # L-diversity: Ensure diverse sensitive values
+                'fraud_indicator': txn['is_fraud'],
+                
+                # Pseudo-identifier (one-way hash)
+                'customer_hash': self._hash_customer_id(txn['customer_id']),
+                
+                # Remove direct identifiers
+                # customer_id, card_number, merchant_name - REMOVED
+            }
+            anonymized.append(anonymized_txn)
+        
+        # Verify k-anonymity (k=10)
+        if not self._verify_k_anonymity(anonymized, k=10):
+            raise ValueError("Data does not meet k-anonymity requirement")
+        
+        return anonymized
+    
+    def _generalize_date(self, date_str: str) -> str:
+        """Generalize date to month-level."""
+        # Convert '2024-01-15' to '2024-01'
+        return date_str[:7]
+    
+    def _generalize_amount(self, amount: float) -> str:
+        """Generalize amount to range."""
+        if amount < 100:
+            return '0-100'
+        elif amount < 1000:
+            return '100-1000'
+        elif amount < 10000:
+            return '1000-10000'
+        else:
+            return '10000+'
+    
+    def _hash_customer_id(self, customer_id: str) -> str:
+        """One-way hash of customer ID."""
+        return hashlib.sha256(f"{self.anonymization_key}:{customer_id}".encode()).hexdigest()[:16]
+    
+    def _verify_k_anonymity(self, data: List[Dict], k: int) -> bool:
+        """Verify data meets k-anonymity."""
+        # Group by quasi-identifiers
+        groups = {}
+        for record in data:
+            key = (
+                record['transaction_date'],
+                record['amount_range'],
+                record['merchant_category'],
+                record['transaction_type']
+            )
+            groups[key] = groups.get(key, 0) + 1
+        
+        # Check each group has at least k records
+        return all(count >= k for count in groups.values())
+
+# ============================================================
+# FEDERATED LEARNING FOR FRAUD MODELS
+# ============================================================
+
+class FederatedFraudModel:
+    """Train fraud model without sharing raw data."""
+    
+    def __init__(self):
+        self.global_model = None
+        self.bank_models = {}
+    
+    def train_federated(self, bank_data: Dict[str, List[Dict]], rounds: int = 10):
+        """Train model using federated learning."""
+        # Initialize global model
+        self.global_model = self._initialize_model()
+        
+        for round_num in range(rounds):
+            # Each bank trains locally
+            local_updates = {}
+            for bank_id, data in bank_data.items():
+                local_model = self._train_local(data)
+                local_updates[bank_id] = self._get_model_updates(local_model)
+            
+            # Aggregate updates (secure aggregation)
+            self._aggregate_updates(local_updates)
+            
+            print(f"Round {round_num + 1} completed")
+        
+        return self.global_model
+    
+    def _train_local(self, data: List[Dict]) -> 'Model':
+        """Train model on local data only."""
+        # Data never leaves the bank
+        # Only model updates (gradients) are shared
+        pass
+    
+    def _aggregate_updates(self, updates: Dict[str, 'ModelUpdate']):
+        """Securely aggregate model updates."""
+        # Use secure aggregation to prevent leaking individual updates
+        pass
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Privacy protection | Basic anonymization | k-anonymity + differential privacy | Stronger privacy |
+| Data sharing | Full data exchange | Federated learning | Raw data stays local |
+| Fraud detection | Single bank | Multi-bank insights | 30% better detection |
+| Compliance | GDPR risk | Privacy-preserving | Compliant |
+| Trust between banks | Low | High | Enabled collaboration |
+
+---
+
+### Scenario Comparison Matrix
+
+| Aspect | Customer Data | Card Data (PCI) | Fraud Detection | Regulatory | Multi-Bank |
+|--------|---------------|-----------------|-----------------|------------|------------|
+| **Primary Threat** | Data breach | PAN exposure | Model theft | Tampering | Privacy leak |
+| **Key Control** | Column encryption | Tokenization | Secure ML | Digital signatures | Differential privacy |
+| **Compliance** | GDPR, SOX | PCI DSS | Internal | SOX, banking regs | GDPR, PDPA |
+| **Implementation Time** | 2 weeks | 1 month | 3 weeks | 2 weeks | 2 months |
+| **Risk Reduction** | 95% | 99% | 90% | 100% | 85% |
+| **Cost Impact** | Medium | High | Medium | Low | High |
 
 ---
 

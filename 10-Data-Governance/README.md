@@ -6,6 +6,11 @@
 3. [Data Cataloging](#3-data-cataloging)
 4. [Data Lineage](#4-data-lineage)
 5. [Real-World Scenarios](#5-real-world-scenarios)
+   - [Scenario 1: Banking Customer Data Governance](#scenario-1-banking-customer-data-governance)
+   - [Scenario 2: Transaction Data Quality Management](#scenario-2-transaction-data-quality-management)
+   - [Scenario 3: Regulatory Compliance Data Governance](#scenario-3-regulatory-compliance-data-governance)
+   - [Scenario 4: Data Catalog for Banking Analytics](#scenario-4-data-catalog-for-banking-analytics)
+   - [Scenario 5: Data Lineage for Regulatory Reporting](#scenario-5-data-lineage-for-regulatory-reporting)
 6. [Hands-On Exercises](#6-hands-on-exercises)
 7. [Interview Questions](#7-interview-questions)
 
@@ -347,40 +352,1274 @@ WHERE referenced_table = 'stg_orders';
 
 ## 5. Real-World Scenarios
 
-### Scenario 1: Healthcare Data Governance
+### Overview
+
+This section presents **5 complete banking data governance scenarios** that demonstrate how to implement comprehensive governance frameworks for financial institutions. Each scenario includes the business context, governance architecture, implementation code, and compliance outcomes.
+
+---
+
+### Scenario 1: Banking Customer Data Governance
+
+> **Business Context:** A bank with 10M+ customers needs to implement governance for customer PII while enabling analytics and regulatory reporting.
+
+#### Governance Architecture
 
 ```
-Data Sources          Governance Layer        Compliance
-+----------+         +---------------+      +-----------+
-| EHR      |-------->| Data Catalog  |----->| HIPAA     |
-| (FHIR)   |         | - PHI tags    |      | Compliance|
-+----------+         | - Lineage     |      | Reports   |
-| Lab       |-------->| - Quality     |      |           |
-| Results   |         | - Access ctrl |      | Audit     |
-+----------+         +---------------+      | Trail     |
-| Imaging   |-------->|               |      +-----------+
-| (DICOM)   |         | +------------+|
-+----------+         | | Monitoring ||
-                      | | & Alerts   ||
-                      | +------------+|
+┌─────────────────────────────────────────────────────────────────────────┐
+│              BANKING CUSTOMER DATA GOVERNANCE                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA SOURCES                                  │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Core     │  │ Digital  │  │ Branch   │  │ Third-   │       │  │
+│   │  │ Banking  │  │ Channels │  │ Systems  │  │ Party    │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    GOVERNANCE LAYER                               │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │              DATA CLASSIFICATION ENGINE                     │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ PII      │  │ Financial│  │ Sensitive│  │ Public   │ │ │  │
+│   │  │  │ Detector │  │ Classifier│  │ Data    │  │ Data     │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │              DATA CATALOG (OpenMetadata)                   │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ Metadata │  │ Lineage  │  │ Quality  │  │ Access   │ │ │  │
+│   │  │  │ Store    │  │ Graph    │  │ Scores   │  │ Control  │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │              COMPLIANCE & MONITORING                        │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ GDPR     │  │ Audit    │  │ Data     │  │ Alert    │ │ │  │
+│   │  │  │ Controls │  │ Logging  │  │ Masking  │  │ System   │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Scenario 2: Financial Services Governance
+#### Implementation Code
+
+```sql
+-- ============================================================
+-- 1. DATA CLASSIFICATION SYSTEM
+-- ============================================================
+
+-- Create classification metadata table
+CREATE TABLE data_classification (
+    classification_id SERIAL PRIMARY KEY,
+    table_name VARCHAR(100),
+    column_name VARCHAR(100),
+    classification_level VARCHAR(20),  -- PUBLIC, INTERNAL, CONFIDENTIAL, RESTRICTED
+    data_type VARCHAR(50),  -- PII, FINANCIAL, SENSITIVE
+    description TEXT,
+    owner VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Classify customer data
+INSERT INTO data_classification (table_name, column_name, classification_level, data_type, description, owner)
+VALUES
+    ('customers', 'customer_id', 'INTERNAL', 'IDENTIFIER', 'Unique customer identifier', 'data-governance@bank.com'),
+    ('customers', 'name', 'CONFIDENTIAL', 'PII', 'Customer full name', 'data-governance@bank.com'),
+    ('customers', 'email', 'CONFIDENTIAL', 'PII', 'Customer email address', 'data-governance@bank.com'),
+    ('customers', 'ssn', 'RESTRICTED', 'PII', 'Social Security Number', 'compliance@bank.com'),
+    ('customers', 'phone', 'CONFIDENTIAL', 'PII', 'Customer phone number', 'data-governance@bank.com'),
+    ('accounts', 'account_number', 'RESTRICTED', 'FINANCIAL', 'Bank account number', 'compliance@bank.com'),
+    ('accounts', 'balance', 'CONFIDENTIAL', 'FINANCIAL', 'Account balance', 'finance@bank.com');
+
+-- ============================================================
+-- 2. ACCESS CONTROL POLICIES
+-- ============================================================
+
+-- Create role-based access control table
+CREATE TABLE access_policies (
+    policy_id SERIAL PRIMARY KEY,
+    role_name VARCHAR(50),
+    classification_level VARCHAR(20),
+    access_type VARCHAR(20),  -- READ, WRITE, MASKED
+    conditions JSONB,  -- Additional conditions
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Define access policies
+INSERT INTO access_policies (role_name, classification_level, access_type, conditions)
+VALUES
+    ('data_analyst', 'PUBLIC', 'READ', '{}'),
+    ('data_analyst', 'INTERNAL', 'READ', '{}'),
+    ('data_analyst', 'CONFIDENTIAL', 'MASKED', '{"mask_pii": true}'),
+    ('data_analyst', 'RESTRICTED', 'DENY', '{}'),
+    ('data_engineer', 'PUBLIC', 'READ', '{}'),
+    ('data_engineer', 'INTERNAL', 'READ', '{}'),
+    ('data_engineer', 'CONFIDENTIAL', 'READ', '{"audit_log": true}'),
+    ('data_engineer', 'RESTRICTED', 'MASKED', '{"mask_pii": true}'),
+    ('compliance_officer', 'PUBLIC', 'READ', '{}'),
+    ('compliance_officer', 'INTERNAL', 'READ', '{}'),
+    ('compliance_officer', 'CONFIDENTIAL', 'READ', '{}'),
+    ('compliance_officer', 'RESTRICTED', 'READ', '{}');
+
+-- ============================================================
+-- 3. DATA MASKING FUNCTION
+-- ============================================================
+
+-- Create masking function
+CREATE OR REPLACE FUNCTION mask_data(
+    p_value TEXT,
+    p_classification VARCHAR(20),
+    p_data_type VARCHAR(50)
+) RETURNS TEXT AS $$
+BEGIN
+    -- No masking for non-sensitive data
+    IF p_classification IN ('PUBLIC', 'INTERNAL') THEN
+        RETURN p_value;
+    END IF;
+    
+    -- Mask PII data
+    IF p_data_type = 'PII' THEN
+        IF p_classification = 'CONFIDENTIAL' THEN
+            -- Partial masking for confidential PII
+            RETURN LEFT(p_value, 2) || '***' || RIGHT(p_value, 2);
+        ELSIF p_classification = 'RESTRICTED' THEN
+            -- Full masking for restricted PII
+            RETURN '***MASKED***';
+        END IF;
+    END IF;
+    
+    -- Mask financial data
+    IF p_data_type = 'FINANCIAL' THEN
+        IF p_classification = 'RESTRICTED' THEN
+            RETURN '****' || RIGHT(p_value, 4);
+        END IF;
+    END IF;
+    
+    RETURN p_value;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- 4. AUDIT LOGGING
+-- ============================================================
+
+-- Create audit log table
+CREATE TABLE data_access_audit (
+    audit_id SERIAL PRIMARY KEY,
+    table_name VARCHAR(100),
+    column_name VARCHAR(100),
+    access_type VARCHAR(20),
+    user_name VARCHAR(100),
+    user_role VARCHAR(50),
+    classification_level VARCHAR(20),
+    access_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    query_text TEXT,
+    ip_address INET
+);
+
+-- Create audit trigger function
+CREATE OR REPLACE FUNCTION audit_data_access()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO data_access_audit (
+        table_name, column_name, access_type, user_name, user_role
+    ) VALUES (
+        TG_TABLE_NAME,
+        TG_ARGV[0],
+        TG_OP,
+        current_user,
+        current_setting('app.user_role', true)
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- 5. GDPR COMPLIANCE - RIGHT TO ERASURE
+-- ============================================================
+
+-- Create customer consent tracking
+CREATE TABLE customer_consents (
+    consent_id SERIAL PRIMARY KEY,
+    customer_id INT,
+    consent_type VARCHAR(50),  -- MARKETING, ANALYTICS, THIRD_PARTY
+    consent_granted BOOLEAN,
+    consent_date TIMESTAMP,
+    expiry_date TIMESTAMP,
+    withdrawal_date TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Function to handle right to erasure
+CREATE OR REPLACE FUNCTION gdpr_erase_customer(p_customer_id INT)
+RETURNS BOOLEAN AS $$
+BEGIN
+    -- Log the erasure request
+    INSERT INTO data_access_audit (table_name, access_type, user_name, query_text)
+    VALUES ('customers', 'DELETE', 'GDPR_SYSTEM', 'GDPR Erasure Request');
+    
+    -- Anonymize customer data (keep for audit)
+    UPDATE customers SET
+        name = 'DELETED_' || customer_id,
+        email = 'deleted_' || customer_id || '@anonymized.com',
+        ssn = NULL,
+        phone = NULL,
+        address = NULL,
+        deleted_at = CURRENT_TIMESTAMP
+    WHERE customer_id = p_customer_id;
+    
+    -- Delete related records
+    DELETE FROM customer_consents WHERE customer_id = p_customer_id;
+    
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Data classification | Manual, incomplete | Automated, 100% | 100% coverage |
+| Access control | Basic RBAC | RBAC + masking + audit | Defense in depth |
+| GDPR compliance | Partial | Full | 100% compliant |
+| Audit trail | None | Complete | Full visibility |
+| Data discovery time | Hours | Minutes | 90% faster |
+
+---
+
+### Scenario 2: Transaction Data Quality Management
+
+> **Business Context:** A bank processes 2M+ daily transactions and needs to ensure data quality for accurate financial reporting.
+
+#### Quality Management Framework
 
 ```
-Regulatory Requirements:
-- Basel III: Capital adequacy reporting
-- GDPR: Customer data privacy
-- SOX: Financial audit trails
-- PCI DSS: Payment card data security
-
-Governance Implementation:
-1. Data Classification: PII, Financial, Public
-2. Access Control: Role-based + attribute-based
-3. Encryption: At rest (AES-256) + in transit (TLS)
-4. Audit Logging: All data access logged
-5. Retention: 7 years for financial data
+┌─────────────────────────────────────────────────────────────────────────┐
+│              TRANSACTION DATA QUALITY FRAMEWORK                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA SOURCES                                  │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Card     │  │ Wire     │  │ ACH      │  │ Internal │       │  │
+│   │  │ Transfers│  │ Transfers│  │ Payments │  │ Transfers│       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    QUALITY CHECKS                                │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  1. COMPLETENESS CHECK                                      │ │  │
+│   │  │     - All required fields present                           │ │  │
+│   │  │     - No null values in critical columns                   │ │  │
+│   │  │                                                            │ │  │
+│   │  │  2. ACCURACY CHECK                                          │ │  │
+│   │  │     - Amounts within valid ranges                          │ │  │
+│   │  │     - Account numbers exist                                │ │  │
+│   │  │                                                            │ │  │
+│   │  │  3. CONSISTENCY CHECK                                       │ │  │
+│   │  │     - Balances match across systems                        │ │  │
+│   │  │     - Transaction types valid                              │ │  │
+│   │  │                                                            │ │  │
+│   │  │  4. UNIQUENESS CHECK                                        │ │  │
+│   │  │     - No duplicate transaction IDs                         │ │  │
+│   │  │                                                            │ │  │
+│   │  │  5. TIMELINESS CHECK                                        │ │  │
+│   │  │     - Data freshness within SLA                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  QUALITY DASHBOARD & ALERTING                               │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ Real-time│  │ SLA      │  │ Trend    │  │ Alert    │ │ │  │
+│   │  │  │ Metrics  │  │ Tracking │  │ Analysis │  │ System   │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+#### Implementation Code
+
+```python
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Dict, List
+import json
+
+class TransactionDataQuality:
+    """Comprehensive data quality framework for banking transactions."""
+    
+    def __init__(self):
+        self.quality_results = []
+        self.alerts = []
+    
+    def check_completeness(self, df: pd.DataFrame) -> Dict:
+        """Check completeness of transaction data."""
+        required_columns = [
+            'transaction_id', 'account_id', 'amount', 
+            'transaction_type', 'transaction_date', 'status'
+        ]
+        
+        results = {}
+        for col in required_columns:
+            if col in df.columns:
+                null_count = df[col].isnull().sum()
+                completeness = (len(df) - null_count) / len(df) * 100
+                results[col] = {
+                    'completeness_pct': completeness,
+                    'null_count': null_count,
+                    'passed': null_count == 0
+                }
+                
+                if null_count > 0:
+                    self.alerts.append({
+                        'type': 'COMPLETENESS_FAILURE',
+                        'column': col,
+                        'null_count': null_count,
+                        'timestamp': datetime.now()
+                    })
+        
+        return results
+    
+    def check_accuracy(self, df: pd.DataFrame) -> Dict:
+        """Check accuracy of transaction amounts."""
+        results = {}
+        
+        # Check amount ranges
+        invalid_amounts = df[(df['amount'] <= 0) | (df['amount'] > 10000000)]
+        results['amount_range'] = {
+            'invalid_count': len(invalid_amounts),
+            'passed': len(invalid_amounts) == 0
+        }
+        
+        # Check account existence (simulated)
+        # In production: Query account master table
+        results['account_existence'] = {
+            'invalid_count': 0,  # Simulated
+            'passed': True
+        }
+        
+        # Check transaction type validity
+        valid_types = ['DEBIT', 'CREDIT', 'TRANSFER', 'WIRE', 'ACH']
+        invalid_types = df[~df['transaction_type'].isin(valid_types)]
+        results['transaction_type'] = {
+            'invalid_count': len(invalid_types),
+            'passed': len(invalid_types) == 0
+        }
+        
+        return results
+    
+    def check_consistency(self, df: pd.DataFrame) -> Dict:
+        """Check consistency across systems."""
+        results = {}
+        
+        # Check for duplicate transaction IDs
+        duplicates = df[df.duplicated(subset=['transaction_id'], keep=False)]
+        results['duplicate_ids'] = {
+            'duplicate_count': len(duplicates),
+            'passed': len(duplicates) == 0
+        }
+        
+        # Check balance consistency (simulated)
+        # In production: Compare with account balances
+        results['balance_consistency'] = {
+            'variance_count': 0,  # Simulated
+            'passed': True
+        }
+        
+        return results
+    
+    def check_timeliness(self, df: pd.DataFrame) -> Dict:
+        """Check data freshness."""
+        results = {}
+        
+        # Check transaction date freshness
+        max_date = pd.to_datetime(df['transaction_date']).max()
+        hours_old = (datetime.now() - max_date).total_seconds() / 3600
+        
+        results['freshness'] = {
+            'hours_old': hours_old,
+            'max_allowed_hours': 24,
+            'passed': hours_old <= 24
+        }
+        
+        if hours_old > 24:
+            self.alerts.append({
+                'type': 'TIMELINESS_FAILURE',
+                'hours_old': hours_old,
+                'timestamp': datetime.now()
+            })
+        
+        return results
+    
+    def run_all_checks(self, df: pd.DataFrame) -> Dict:
+        """Run all quality checks."""
+        results = {
+            'completeness': self.check_completeness(df),
+            'accuracy': self.check_accuracy(df),
+            'consistency': self.check_consistency(df),
+            'timeliness': self.check_timeliness(df)
+        }
+        
+        # Calculate overall score
+        total_checks = 0
+        passed_checks = 0
+        for dimension in results.values():
+            for check in dimension.values():
+                total_checks += 1
+                if check.get('passed', False):
+                    passed_checks += 1
+        
+        results['overall_score'] = (passed_checks / total_checks * 100) if total_checks > 0 else 0
+        results['total_checks'] = total_checks
+        results['passed_checks'] = passed_checks
+        
+        return results
+    
+    def generate_report(self) -> str:
+        """Generate quality report."""
+        report = f"""
+=== Transaction Data Quality Report ===
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Quality Dimensions:
+- Completeness: {self.results.get('completeness', {})}
+- Accuracy: {self.results.get('accuracy', {})}
+- Consistency: {self.results.get('consistency', {})}
+- Timeliness: {self.results.get('timeliness', {})}
+
+Overall Score: {self.results.get('overall_score', 0):.2f}%
+Alerts Generated: {len(self.alerts)}
+"""
+        return report
+
+# Test with sample data
+def test_quality_framework():
+    # Create sample transaction data with quality issues
+    df = pd.DataFrame({
+        'transaction_id': ['TXN001', 'TXN002', 'TXN003', 'TXN003', 'TXN005'],  # Duplicate
+        'account_id': ['ACC001', 'ACC002', None, 'ACC004', 'ACC005'],  # Null
+        'amount': [1000, 2500, -500, 1500, 15000000],  # Invalid ranges
+        'transaction_type': ['DEBIT', 'CREDIT', 'INVALID', 'TRANSFER', 'WIRE'],  # Invalid type
+        'transaction_date': [
+            datetime.now() - timedelta(hours=1),
+            datetime.now() - timedelta(hours=2),
+            datetime.now() - timedelta(hours=3),
+            datetime.now() - timedelta(hours=4),
+            datetime.now() - timedelta(hours=25)  # Too old
+        ],
+        'status': ['COMPLETED', 'COMPLETED', 'PENDING', 'COMPLETED', 'COMPLETED']
+    })
+    
+    checker = TransactionDataQuality()
+    results = checker.run_all_checks(df)
+    print(checker.generate_report())
+    
+    return results
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Data quality score | 85% | 99.5% | 99.5% accurate |
+| Duplicate transactions | 500/day | 0 | 100% reduction |
+| Invalid amounts | 200/day | 0 | 100% reduction |
+| Data freshness | 48 hours | 1 hour | 98% faster |
+| Quality incidents | 50/month | 2/month | 96% reduction |
+
+---
+
+### Scenario 3: Regulatory Compliance Data Governance
+
+> **Business Context:** A bank must comply with Basel III, GDPR, SOX, and local banking regulations while managing 100TB+ of data.
+
+#### Compliance Framework
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              REGULATORY COMPLIANCE FRAMEWORK                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    REGULATORY REQUIREMENTS                       │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Basel III│  │ GDPR     │  │ SOX      │  │ PCI DSS  │       │  │
+│   │  │          │  │          │  │          │  │          │       │  │
+│   │  │ Capital  │  │ Customer │  │ Financial│  │ Payment  │       │  │
+│   │  │ Adequacy │  │ Privacy  │  │ Audit    │  │ Card     │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    GOVERNANCE CONTROLS                           │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  DATA RETENTION POLICIES                                    │ │  │
+│   │  │                                                            │ │  │
+│   │  │  - Transaction data: 7 years                               │ │  │
+│   │  │  - Customer PII: Until consent revoked + 5 years          │ │  │
+│   │  │  - Audit logs: 10 years (immutable)                        │ │  │
+│   │  │  - Marketing data: 2 years                                 │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  DATA LINEAGE & IMPACT ANALYSIS                           │ │  │
+│   │  │                                                            │ │  │
+│   │  │  - Track all data transformations                          │ │  │
+│   │  │  - Impact analysis for schema changes                      │ │  │
+│   │  │  - Regulatory report lineage                               │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  AUTOMATED COMPLIANCE REPORTING                            │ │  │
+│   │  │                                                            │ │  │
+│   │  │  - Daily compliance dashboards                             │ │  │
+│   │  │  - Automated regulatory submissions                        │ │  │
+│   │  │  - Audit trail generation                                  │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from datetime import datetime, timedelta
+from typing import Dict, List
+import json
+
+class RegulatoryComplianceGovernance:
+    """Automated compliance governance for banking regulations."""
+    
+    def __init__(self):
+        self.compliance_rules = self._load_compliance_rules()
+        self.audit_trail = []
+    
+    def _load_compliance_rules(self) -> Dict:
+        """Load regulatory compliance rules."""
+        return {
+            'BASEL_III': {
+                'data_retention': 2555,  # 7 years in days
+                'required_fields': ['capital_ratio', 'rwa', 'tier1_capital'],
+                'reporting_frequency': 'daily',
+                'data_classification': 'RESTRICTED'
+            },
+            'GDPR': {
+                'data_retention': None,  # Until consent revoked
+                'required_fields': ['consent_status', 'consent_date'],
+                'reporting_frequency': 'on_demand',
+                'data_classification': 'CONFIDENTIAL',
+                'right_to_erasure': True,
+                'data_portability': True
+            },
+            'SOX': {
+                'data_retention': 3650,  # 10 years
+                'required_fields': ['audit_trail', 'approval_workflow'],
+                'reporting_frequency': 'quarterly',
+                'data_classification': 'RESTRICTED'
+            },
+            'PCI_DSS': {
+                'data_retention': 2555,  # 7 years
+                'required_fields': ['tokenization', 'encryption'],
+                'reporting_frequency': 'annual',
+                'data_classification': 'RESTRICTED'
+            }
+        }
+    
+    def check_data_retention(self, table_name: str, data_age_days: int, regulation: str) -> Dict:
+        """Check data retention compliance."""
+        rule = self.compliance_rules.get(regulation, {})
+        max_retention = rule.get('data_retention')
+        
+        if max_retention is None:
+            return {'compliant': True, 'message': 'No retention limit'}
+        
+        compliant = data_age_days <= max_retention
+        days_until_deletion = max_retention - data_age_days
+        
+        result = {
+            'table_name': table_name,
+            'regulation': regulation,
+            'data_age_days': data_age_days,
+            'max_retention_days': max_retention,
+            'compliant': compliant,
+            'days_until_deletion': days_until_deletion
+        }
+        
+        self.audit_trail.append({
+            'action': 'RETENTION_CHECK',
+            'result': result,
+            'timestamp': datetime.now()
+        })
+        
+        return result
+    
+    def check_required_fields(self, data: Dict, regulation: str) -> Dict:
+        """Check if required fields are present."""
+        rule = self.compliance_rules.get(regulation, {})
+        required = rule.get('required_fields', [])
+        
+        missing = [field for field in required if field not in data]
+        compliant = len(missing) == 0
+        
+        result = {
+            'regulation': regulation,
+            'required_fields': required,
+            'missing_fields': missing,
+            'compliant': compliant
+        }
+        
+        self.audit_trail.append({
+            'action': 'REQUIRED_FIELDS_CHECK',
+            'result': result,
+            'timestamp': datetime.now()
+        })
+        
+        return result
+    
+    def check_data_classification(self, data_classification: str, regulation: str) -> Dict:
+        """Check if data classification meets regulation requirements."""
+        rule = self.compliance_rules.get(regulation, {})
+        required_classification = rule.get('data_classification')
+        
+        classification_hierarchy = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED']
+        
+        data_level = classification_hierarchy.index(data_classification)
+        required_level = classification_hierarchy.index(required_classification)
+        
+        compliant = data_level >= required_level
+        
+        result = {
+            'regulation': regulation,
+            'data_classification': data_classification,
+            'required_classification': required_classification,
+            'compliant': compliant
+        }
+        
+        return result
+    
+    def generate_compliance_report(self) -> Dict:
+        """Generate compliance report."""
+        report = {
+            'generated_at': datetime.now().isoformat(),
+            'total_checks': len(self.audit_trail),
+            'compliance_status': {},
+            'audit_trail': self.audit_trail[-100:]  # Last 100 entries
+        }
+        
+        # Calculate compliance by regulation
+        for entry in self.audit_trail:
+            regulation = entry.get('result', {}).get('regulation', 'UNKNOWN')
+            if regulation not in report['compliance_status']:
+                report['compliance_status'][regulation] = {'total': 0, 'compliant': 0}
+            
+            report['compliance_status'][regulation]['total'] += 1
+            if entry.get('result', {}).get('compliant', False):
+                report['compliance_status'][regulation]['compliant'] += 1
+        
+        # Calculate compliance percentages
+        for regulation, stats in report['compliance_status'].items():
+            if stats['total'] > 0:
+                stats['compliance_pct'] = (stats['compliant'] / stats['total']) * 100
+        
+        return report
+
+# Test compliance framework
+def test_compliance_framework():
+    governance = RegulatoryComplianceGovernance()
+    
+    # Test data retention
+    result1 = governance.check_data_retention('transactions', 365, 'BASEL_III')
+    print(f"Retention check: {result1}")
+    
+    # Test required fields
+    data = {'capital_ratio': 0.12, 'rwa': 1000000}
+    result2 = governance.check_required_fields(data, 'BASEL_III')
+    print(f"Required fields check: {result2}")
+    
+    # Test data classification
+    result3 = governance.check_data_classification('CONFIDENTIAL', 'PCI_DSS')
+    print(f"Classification check: {result3}")
+    
+    # Generate report
+    report = governance.generate_compliance_report()
+    print(f"\nCompliance Report: {json.dumps(report, indent=2, default=str)}")
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Compliance score | 75% | 99% | 99% compliant |
+| Regulatory findings | 30+ per audit | < 3 per audit | 90% reduction |
+| Data retention compliance | Manual | Automated | 100% automated |
+| Audit preparation time | 2 weeks | 2 hours | 99% faster |
+| Regulatory penalties | $500K/year | $0 | Eliminated |
+
+---
+
+### Scenario 4: Data Catalog for Banking Analytics
+
+> **Business Context:** A bank's analytics team spends 40% of time searching for data and only 60% time analyzing. Need to improve data discovery.
+
+#### Data Catalog Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              BANKING DATA CATALOG ARCHITECTURE                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA SOURCES                                  │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Data     │  │ Data     │  │ Reports  │  │ ML       │       │  │
+│   │  │ Warehouse│  │ Lake     │  │          │  │ Models   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    OPENMETADATA CATALOG                          │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  METADATA STORE                                             │ │  │
+│   │  │                                                            │ │  │
+│   │  │  - Technical metadata (schema, types, lineage)            │ │  │
+│   │  │  - Business metadata (descriptions, owners, tags)         │ │  │
+│   │  │  - Operational metadata (freshness, quality, usage)       │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  DISCOVERY & SEARCH                                         │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ Full-text│  │ Tag-based│  │ Column   │  │ AI       │ │ │  │
+│   │  │  │ Search   │  │ Search   │  │ Search   │  │ Recommend│ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  GOVERNANCE & COLLABORATION                                 │ │  │
+│   │  │                                                            │ │  │
+│   │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │ │  │
+│   │  │  │ Access   │  │ Lineage  │  │ Quality  │  │ Social   │ │ │  │
+│   │  │  │ Requests │  │ Tracking │  │ Scores   │  │ Features │ │ │  │
+│   │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │  │
+│   │  │                                                            │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from datetime import datetime
+from typing import Dict, List
+import json
+
+class BankingDataCatalog:
+    """Data catalog implementation for banking analytics."""
+    
+    def __init__(self):
+        self.catalog = {
+            'tables': {},
+            'columns': {},
+            'lineage': {},
+            'quality_scores': {},
+            'ownership': {},
+            'tags': {}
+        }
+        self.search_index = []
+    
+    def register_table(self, table_info: Dict):
+        """Register a table in the catalog."""
+        table_name = table_info['name']
+        self.catalog['tables'][table_name] = {
+            'name': table_name,
+            'database': table_info.get('database'),
+            'schema': table_info.get('schema'),
+            'description': table_info.get('description'),
+            'owner': table_info.get('owner'),
+            'tags': table_info.get('tags', []),
+            'classification': table_info.get('classification', 'INTERNAL'),
+            'created_at': datetime.now().isoformat(),
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        # Add to search index
+        self.search_index.append({
+            'type': 'table',
+            'name': table_name,
+            'description': table_info.get('description', ''),
+            'tags': table_info.get('tags', [])
+        })
+        
+        return table_name
+    
+    def register_column(self, column_info: Dict):
+        """Register a column in the catalog."""
+        column_key = f"{column_info['table']}.{column_info['name']}"
+        self.catalog['columns'][column_key] = {
+            'table': column_info['table'],
+            'name': column_info['name'],
+            'data_type': column_info.get('data_type'),
+            'description': column_info.get('description'),
+            'is_nullable': column_info.get('is_nullable', True),
+            'tags': column_info.get('tags', []),
+            'classification': column_info.get('classification', 'INTERNAL')
+        }
+        
+        # Add to search index
+        self.search_index.append({
+            'type': 'column',
+            'name': column_key,
+            'description': column_info.get('description', ''),
+            'tags': column_info.get('tags', [])
+        })
+        
+        return column_key
+    
+    def add_lineage(self, source: str, target: str, transformation: str):
+        """Add lineage relationship."""
+        lineage_key = f"{source} -> {target}"
+        self.catalog['lineage'][lineage_key] = {
+            'source': source,
+            'target': target,
+            'transformation': transformation,
+            'created_at': datetime.now().isoformat()
+        }
+    
+    def search(self, query: str) -> List[Dict]:
+        """Search the catalog."""
+        results = []
+        query_lower = query.lower()
+        
+        for item in self.search_index:
+            if (query_lower in item['name'].lower() or 
+                query_lower in item['description'].lower() or
+                any(query_lower in tag.lower() for tag in item['tags'])):
+                results.append(item)
+        
+        return results
+    
+    def get_table_details(self, table_name: str) -> Dict:
+        """Get complete table details."""
+        table_info = self.catalog['tables'].get(table_name, {})
+        columns = {k: v for k, v in self.catalog['columns'].items() 
+                   if v['table'] == table_name}
+        
+        return {
+            'table': table_info,
+            'columns': columns,
+            'lineage': {k: v for k, v in self.catalog['lineage'].items() 
+                       if table_name in k}
+        }
+    
+    def generate_catalog_report(self) -> Dict:
+        """Generate catalog statistics."""
+        return {
+            'total_tables': len(self.catalog['tables']),
+            'total_columns': len(self.catalog['columns']),
+            'total_lineage': len(self.catalog['lineage']),
+            'tables_by_classification': self._count_by_classification('tables'),
+            'columns_by_classification': self._count_by_classification('columns')
+        }
+    
+    def _count_by_classification(self, entity_type: str) -> Dict:
+        """Count entities by classification."""
+        counts = {}
+        for entity in self.catalog[entity_type].values():
+            classification = entity.get('classification', 'UNKNOWN')
+            counts[classification] = counts.get(classification, 0) + 1
+        return counts
+
+# Test data catalog
+def test_data_catalog():
+    catalog = BankingDataCatalog()
+    
+    # Register tables
+    catalog.register_table({
+        'name': 'customers',
+        'database': 'banking',
+        'schema': 'public',
+        'description': 'Customer master data',
+        'owner': 'data-governance@bank.com',
+        'tags': ['PII', 'customer', 'master-data'],
+        'classification': 'CONFIDENTIAL'
+    })
+    
+    catalog.register_table({
+        'name': 'transactions',
+        'database': 'banking',
+        'schema': 'public',
+        'description': 'Daily transaction records',
+        'owner': 'data-engineering@bank.com',
+        'tags': ['financial', 'transaction', 'daily'],
+        'classification': 'CONFIDENTIAL'
+    })
+    
+    # Register columns
+    catalog.register_column({
+        'table': 'customers',
+        'name': 'ssn',
+        'data_type': 'VARCHAR',
+        'description': 'Social Security Number',
+        'tags': ['PII', 'sensitive'],
+        'classification': 'RESTRICTED'
+    })
+    
+    # Add lineage
+    catalog.add_lineage('raw.orders', 'stg_orders', 'dbt transformation')
+    catalog.add_lineage('stg_orders', 'fact_orders', 'dbt transformation')
+    
+    # Search
+    results = catalog.search('customer')
+    print(f"Search results: {results}")
+    
+    # Get table details
+    details = catalog.get_table_details('customers')
+    print(f"\nTable details: {json.dumps(details, indent=2)}")
+    
+    # Generate report
+    report = catalog.generate_catalog_report()
+    print(f"\nCatalog report: {json.dumps(report, indent=2)}")
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Data discovery time | 40% of time | 10% of time | 75% reduction |
+| Data documentation | 30% | 95% | 3x improvement |
+| Search success rate | 40% | 95% | 2.4x improvement |
+| Data request fulfillment | 5 days | 1 day | 80% faster |
+| Analytics team productivity | 60% analysis | 90% analysis | 50% improvement |
+
+---
+
+### Scenario 5: Data Lineage for Regulatory Reporting
+
+> **Business Context:** A bank must prove data lineage for all regulatory reports to auditors and regulators.
+
+#### Lineage Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              REGULATORY REPORTING LINEAGE                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    SOURCE SYSTEMS                                │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Core     │  │ Cards    │  │ Loans    │  │ Treasury │       │  │
+│   │  │ Banking  │  │ System   │  │ System   │  │ System   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    DATA LAKEHOUSE (Medallion)                    │  │
+│   │                                                                  │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  BRONZE LAYER (Raw)                                         │ │  │
+│   │  │  - Raw data from source systems                            │ │  │
+│   │  │  - Schema-on-read                                          │ │  │
+│   │  │  - Append-only                                             │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  SILVER LAYER (Cleansed)                                    │ │  │
+│   │  │  - Deduplicated, validated                                  │ │  │
+│   │  │  - Schema enforced                                         │ │  │
+│   │  │  - CDC applied                                             │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                              │                                    │  │
+│   │                              ▼                                    │  │
+│   │  ┌────────────────────────────────────────────────────────────┐ │  │
+│   │  │  GOLD LAYER (Business-Ready)                                │ │  │
+│   │  │  - Star schemas, aggregations                              │ │  │
+│   │  │  - Conformed dimensions                                    │ │  │
+│   │  │  - Materialized views                                     │ │  │
+│   │  └────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    REGULATORY REPORTS                            │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Basel III│  │ AML      │  │ Financial│  │ Call     │       │  │
+│   │  │ Report   │  │ Report   │  │ Statements│  │ Report   │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                              │                                          │
+│                              ▼                                          │
+│   ┌──────────────────────────────────────────────────────────────────┐  │
+│   │                    LINEAGE TRACKING (OpenMetadata)               │  │
+│   │                                                                  │  │
+│   │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │  │
+│   │  │ Column   │  │ Impact   │  │ Audit    │  │ Compliance│      │  │
+│   │  │ Lineage  │  │ Analysis │  │ Trail    │  │ Reports  │       │  │
+│   │  └──────────┘  └──────────┘  └──────────┘  └──────────┘       │  │
+│   │                                                                  │  │
+│   └──────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Implementation Code
+
+```python
+from datetime import datetime
+from typing import Dict, List
+import json
+
+class RegulatoryReportingLineage:
+    """Data lineage tracking for regulatory reports."""
+    
+    def __init__(self):
+        self.lineage_graph = {}
+        self.audit_trail = []
+    
+    def add_transformation(self, source: str, target: str, transformation_type: str, details: Dict):
+        """Add a transformation to the lineage graph."""
+        transformation_id = f"{source}_{target}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        self.lineage_graph[transformation_id] = {
+            'id': transformation_id,
+            'source': source,
+            'target': target,
+            'transformation_type': transformation_type,
+            'details': details,
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # Log to audit trail
+        self.audit_trail.append({
+            'action': 'ADD_TRANSFORMATION',
+            'transformation_id': transformation_id,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        return transformation_id
+    
+    def get_upstream_lineage(self, target: str, max_depth: int = 10) -> List[Dict]:
+        """Get upstream lineage for a target table/column."""
+        upstream = []
+        visited = set()
+        
+        def _traverse(current_target, depth):
+            if depth > max_depth or current_target in visited:
+                return
+            visited.add(current_target)
+            
+            for transformation_id, transformation in self.lineage_graph.items():
+                if transformation['target'] == current_target:
+                    upstream.append(transformation)
+                    _traverse(transformation['source'], depth + 1)
+        
+        _traverse(target, 0)
+        return upstream
+    
+    def get_downstream_lineage(self, source: str, max_depth: int = 10) -> List[Dict]:
+        """Get downstream lineage for a source table/column."""
+        downstream = []
+        visited = set()
+        
+        def _traverse(current_source, depth):
+            if depth > max_depth or current_source in visited:
+                return
+            visited.add(current_source)
+            
+            for transformation_id, transformation in self.lineage_graph.items():
+                if transformation['source'] == current_source:
+                    downstream.append(transformation)
+                    _traverse(transformation['target'], depth + 1)
+        
+        _traverse(source, 0)
+        return downstream
+    
+    def impact_analysis(self, source_table: str) -> Dict:
+        """Analyze impact of changes to a source table."""
+        downstream = self.get_downstream_lineage(source_table)
+        
+        impacted_tables = set()
+        impacted_reports = set()
+        
+        for transformation in downstream:
+            impacted_tables.add(transformation['target'])
+            # Check if target is a regulatory report
+            if 'report' in transformation['target'].lower():
+                impacted_reports.add(transformation['target'])
+        
+        return {
+            'source_table': source_table,
+            'impacted_tables': list(impacted_tables),
+            'impacted_reports': list(impacted_reports),
+            'impact_level': 'HIGH' if impacted_reports else 'MEDIUM' if impacted_tables else 'LOW'
+        }
+    
+    def generate_lineage_report(self, report_name: str) -> Dict:
+        """Generate lineage report for a regulatory report."""
+        upstream = self.get_upstream_lineage(report_name)
+        
+        return {
+            'report_name': report_name,
+            'generated_at': datetime.now().isoformat(),
+            'total_transformations': len(upstream),
+            'lineage_depth': self._calculate_depth(upstream),
+            'source_systems': self._extract_source_systems(upstream),
+            'data_quality_checks': self._extract_quality_checks(upstream),
+            'audit_trail': self.audit_trail[-50:]  # Last 50 entries
+        }
+    
+    def _calculate_depth(self, lineage: List[Dict]) -> int:
+        """Calculate maximum lineage depth."""
+        if not lineage:
+            return 0
+        return max(self._calculate_depth(self.get_upstream_lineage(t['source'])) for t in lineage) + 1
+    
+    def _extract_source_systems(self, lineage: List[Dict]) -> List[str]:
+        """Extract source systems from lineage."""
+        systems = set()
+        for transformation in lineage:
+            if 'source' in transformation.get('details', {}):
+                systems.add(transformation['details']['source'])
+        return list(systems)
+    
+    def _extract_quality_checks(self, lineage: List[Dict]) -> List[Dict]:
+        """Extract quality checks from lineage."""
+        checks = []
+        for transformation in lineage:
+            if transformation.get('transformation_type') == 'quality_check':
+                checks.append(transformation.get('details', {}))
+        return checks
+
+# Test lineage tracking
+def test_lineage_tracking():
+    lineage = RegulatoryReportingLineage()
+    
+    # Add transformations
+    lineage.add_transformation(
+        'core_banking.accounts',
+        'bronze.accounts',
+        'ingestion',
+        {'method': 'CDC', 'frequency': 'daily', 'source': 'Core Banking'}
+    )
+    
+    lineage.add_transformation(
+        'bronze.accounts',
+        'silver.accounts',
+        'transformation',
+        {'method': 'dbt', 'description': 'Deduplicate and validate'}
+    )
+    
+    lineage.add_transformation(
+        'silver.accounts',
+        'gold.dim_accounts',
+        'transformation',
+        {'method': 'dbt', 'description': 'Create dimension table'}
+    )
+    
+    lineage.add_transformation(
+        'gold.dim_accounts',
+        'basel_iii_report',
+        'report_generation',
+        {'method': 'dbt', 'description': 'Generate Basel III report'}
+    )
+    
+    # Get lineage
+    upstream = lineage.get_upstream_lineage('basel_iii_report')
+    print(f"\nUpstream lineage for Basel III report:")
+    for t in upstream:
+        print(f"  {t['source']} -> {t['target']}")
+    
+    # Impact analysis
+    impact = lineage.impact_analysis('core_banking.accounts')
+    print(f"\nImpact analysis:")
+    print(f"  Impacted tables: {impact['impacted_tables']}")
+    print(f"  Impacted reports: {impact['impacted_reports']}")
+    print(f"  Impact level: {impact['impact_level']}")
+    
+    # Generate report
+    report = lineage.generate_lineage_report('basel_iii_report')
+    print(f"\nLineage report: {json.dumps(report, indent=2, default=str)}")
+```
+
+#### Key Metrics & Outcomes
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Lineage coverage | 20% | 95% | 5x improvement |
+| Audit preparation | 2 weeks | 2 hours | 99% faster |
+| Impact analysis | Manual, error-prone | Automated, accurate | 100% accuracy |
+| Regulatory findings | 20+ per audit | 0 | Zero findings |
+| Change management | Reactive | Proactive | 90% faster |
+
+---
+
+### Scenario Comparison Matrix
+
+| Aspect | Customer Data | Transaction Quality | Compliance | Data Catalog | Lineage |
+|--------|---------------|---------------------|------------|--------------|----------|
+| **Primary Focus** | PII protection | Data accuracy | Regulatory compliance | Data discovery | Audit trail |
+| **Key Tools** | Masking, RLS | Great Expectations | Custom rules | OpenMetadata | dbt, OpenMetadata |
+| **Compliance** | GDPR, SOX | Basel III, SOX | All regulations | Internal | Regulatory |
+| **Implementation Time** | 2 weeks | 1 week | 1 month | 2 weeks | 2 weeks |
+| **Risk Reduction** | 95% | 90% | 99% | 80% | 95% |
+| **Cost Impact** | Medium | Low | High | Medium | Low |
 
 ---
 
